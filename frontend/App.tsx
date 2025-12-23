@@ -16,7 +16,7 @@ import { calculateRecommendedIndents } from './services/calculationService';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { fetchOrgData, saveOrgData } from './services/orgDataService';
-import { fetchCalculations, saveCalculation } from './services/calculationsService';
+import { fetchCalculations, saveCalculation, deleteCalculation } from './services/calculationsService';
 import { createTicket, fetchAllTickets, fetchMyOrgTickets, updateTicketStatus } from './services/supportService';
 // FIX: Update import for CalculationInputs
 import type { Bonding, Indent, Purchase, CalculationRun, StoredData, User, SupportTicket, SupportTicketStatus, CalculationInputs, Constraint } from './types';
@@ -90,6 +90,42 @@ const AppContent: React.FC = () => {
         status: (t.status || 'open') as SupportTicketStatus,
     }), []);
 
+    const mapCalculationRun = useCallback((r: any): CalculationRun => {
+        const safeParse = (val: any) => {
+            if (val === null || val === undefined) return {};
+            if (typeof val === 'string') {
+                try { return JSON.parse(val); } catch { return { raw: val }; }
+            }
+            if (val?.toString) {
+                try { return JSON.parse(val.toString()); } catch { return { raw: val.toString() }; }
+            }
+            return val;
+        };
+        const ensureArray = (v: any) => (Array.isArray(v) ? v : []);
+
+        const inputsRaw = r.inputs_json ?? r.inputs;
+        const resultsRaw = r.results_json ?? r.results;
+        const parsedResults = safeParse(resultsRaw) || {};
+        const normalizedResults: any = {
+            ...parsedResults,
+            tableData: ensureArray((parsedResults as any).tableData ?? (parsedResults as any).results),
+            indentCalculationBreakdown: ensureArray((parsedResults as any).indentCalculationBreakdown),
+            openIndentMatrix: ensureArray((parsedResults as any).openIndentMatrix),
+            forecastBreakdown: ensureArray((parsedResults as any).forecastBreakdown),
+            maturityAnalysisPurchases: ensureArray((parsedResults as any).maturityAnalysisPurchases),
+            fullSeasonAnalysis: ensureArray((parsedResults as any).fullSeasonAnalysis),
+            closedIndentAnalysis: ensureArray((parsedResults as any).closedIndentAnalysis),
+        };
+
+        return {
+            id: String(r.id),
+            name: r.name,
+            timestamp: new Date(r.created_at || Date.now()).getTime(),
+            inputs: safeParse(inputsRaw),
+            results: normalizedResults,
+        } as CalculationRun;
+    }, []);
+
     const loadOrgData = useCallback(async () => {
         if (!currentUser || currentUser.role === 'superadmin' || !token) return;
         try {
@@ -120,39 +156,7 @@ const AppContent: React.FC = () => {
             setPurchaseData(parseFile('purchase'));
             const calcResp = await fetchCalculations(token);
             console.log('[loadOrgData] calc runs len', calcResp?.runs?.length, 'sample', calcResp?.runs?.[0]);
-            const runs = (calcResp.runs || []).map((r: any) => {
-                const inputsRaw = r.inputs_json ?? r.inputs;
-                const resultsRaw = r.results_json ?? r.results;
-                const safeParse = (val: any) => {
-                    if (val === null || val === undefined) return {};
-                    if (typeof val === 'string') {
-                        try { return JSON.parse(val); } catch { return { raw: val }; }
-                    }
-                    if (val?.toString) {
-                        try { return JSON.parse(val.toString()); } catch { return { raw: val.toString() }; }
-                    }
-                    return val;
-                };
-                const parsedResults = safeParse(resultsRaw) || {};
-                const ensureArray = (v: any) => (Array.isArray(v) ? v : []);
-                const normalizedResults: any = {
-                    ...parsedResults,
-                    tableData: ensureArray((parsedResults as any).tableData ?? (parsedResults as any).results),
-                    indentCalculationBreakdown: ensureArray((parsedResults as any).indentCalculationBreakdown),
-                    openIndentMatrix: ensureArray((parsedResults as any).openIndentMatrix),
-                    forecastBreakdown: ensureArray((parsedResults as any).forecastBreakdown),
-                    maturityAnalysisPurchases: ensureArray((parsedResults as any).maturityAnalysisPurchases),
-                    fullSeasonAnalysis: ensureArray((parsedResults as any).fullSeasonAnalysis),
-                    closedIndentAnalysis: ensureArray((parsedResults as any).closedIndentAnalysis),
-                };
-                return {
-                    id: String(r.id),
-                    name: r.name,
-                    timestamp: new Date(r.created_at || Date.now()).getTime(),
-                    inputs: safeParse(inputsRaw),
-                    results: normalizedResults,
-                } as CalculationRun;
-            });
+            const runs = (calcResp.runs || []).map(mapCalculationRun);
             setCalculationHistory(runs);
             const ticketResp = await fetchMyOrgTickets(token);
             setSupportTickets((ticketResp.tickets || []).map(mapTicket));
@@ -160,7 +164,7 @@ const AppContent: React.FC = () => {
             console.error('[loadOrgData] error', e);
             setError(e.message || 'Failed to load organization data');
         }
-    }, [currentUser, token, mapTicket]);
+    }, [currentUser, token, mapTicket, mapCalculationRun]);
 
     useEffect(() => {
         const loadSupportTickets = async () => {
@@ -187,6 +191,20 @@ const AppContent: React.FC = () => {
             setPage('home');
         }
     }, [currentUser, loadOrgData]);
+
+    // Refresh history when navigating to the history page (in case another session added/deleted runs)
+    useEffect(() => {
+        const refreshHistory = async () => {
+            if (page !== 'history' || !token || !currentUser || currentUser.role === 'superadmin') return;
+            try {
+                const calcResp = await fetchCalculations(token);
+                setCalculationHistory((calcResp.runs || []).map(mapCalculationRun));
+            } catch (e: any) {
+                setError(e?.message || 'Failed to load history');
+            }
+        };
+        refreshHistory();
+    }, [page, token, currentUser, mapCalculationRun]);
     
     const openDataGridModal = (dataType: DataType) => {
         const dataMap = {
@@ -313,7 +331,16 @@ const AppContent: React.FC = () => {
 
             if (token) {
                 try {
-                    await saveCalculation(token, newRun.name, inputs, results);
+                    const resp = await saveCalculation(token, newRun.name, inputs, results);
+                    if (resp?.run) {
+                        const saved = mapCalculationRun(resp.run);
+                        setCalculationHistory(prev => {
+                            const replaced = prev.map(r => r.id === newRun.id ? saved : r);
+                            // If not found (edge), prepend
+                            if (!replaced.find(r => r.id === saved.id)) return [saved, ...prev.filter(r => r.id !== newRun.id)];
+                            return replaced;
+                        });
+                    }
                 } catch (e) {
                     console.warn('Failed to persist calculation to backend', e);
                 }
@@ -510,13 +537,31 @@ const AppContent: React.FC = () => {
         setPage('calculator');
     };
 
-    const handleDeleteHistoryItem = (id: string) => {
+    const handleDeleteHistoryItem = async (id: string) => {
         if (!currentUser || !currentUser.organizationId) return;
-        setCalculationHistory(prev => {
-            const newHistory = prev.filter(item => item.id !== id);
-            if (activeCalculationId === id) setActiveCalculationId(null);
-            return newHistory;
-        });
+        console.log('[history] delete clicked', { id, activeCalculationId });
+        setCalculationHistory(prev => prev.filter(item => item.id !== id));
+        if (activeCalculationId === id) setActiveCalculationId(null);
+
+        if (!token) return;
+        try {
+            await deleteCalculation(token, id);
+            console.log('[history] delete API success', { id });
+            const calcResp = await fetchCalculations(token);
+            console.log('[history] reload after delete', { count: calcResp?.runs?.length });
+            setCalculationHistory((calcResp.runs || []).map(mapCalculationRun));
+            showToast('Calculation deleted', 'success');
+        } catch (e: any) {
+            console.error('[history] delete failed', e);
+            showToast(e?.message || 'Failed to delete calculation', 'error');
+            try {
+                const calcResp = await fetchCalculations(token);
+                console.log('[history] reload after delete failure', { count: calcResp?.runs?.length });
+                setCalculationHistory((calcResp.runs || []).map(mapCalculationRun));
+            } catch (_) {
+                // ignore secondary failure
+            }
+        }
     };
     
     const handleRaiseTicket = async (ticketData: Omit<SupportTicket, 'id' | 'timestamp' | 'userId' | 'userName' | 'userEmail' | 'organizationId' | 'organizationName' | 'status'>) => {

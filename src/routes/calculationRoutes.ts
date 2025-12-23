@@ -32,20 +32,55 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
 
     const insertedId = result.insertId;
 
-    // Return the saved run
+    // Return the inserted run (single row) for client to sync ids
     const [rows]: any = await pool.query(
-        `SELECT id, org_id, user_id, name, inputs_json, results_json, created_at
-        FROM calculation_runs
-        WHERE org_id = ?
-        ORDER BY created_at DESC
-        LIMIT 50`,
-        [user.orgId]
-        );
+      `SELECT id, org_id, user_id, name, inputs_json, results_json, created_at
+       FROM calculation_runs
+       WHERE id = ?
+       LIMIT 1`,
+      [insertedId]
+    );
 
     res.json({ ok: true, run: rows[0] });
   } catch (err) {
     console.error('Error saving calculation run:', err);
     res.status(500).json({ ok: false, error: 'Failed to save calculation run' });
+  }
+});
+
+/**
+ * DELETE /api/calculations/:id
+ * Removes a calculation run scoped to the caller's organization.
+ */
+router.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const user = req.user!;
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ ok: false, error: 'Missing calculation id' });
+    }
+
+    // Ensure the run belongs to caller's org
+    const [rows]: any = await pool.query(
+      `SELECT id FROM calculation_runs WHERE id = ? AND org_id = ? LIMIT 1`,
+      [id, user.orgId]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Calculation not found' });
+    }
+
+    const [delResult]: any = await pool.query(`DELETE FROM calculation_runs WHERE id = ?`, [id]);
+
+    if (!delResult || delResult.affectedRows === 0) {
+      return res.status(404).json({ ok: false, error: 'Calculation not found' });
+    }
+
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error('Error deleting calculation run:', err);
+    res.status(500).json({ ok: false, error: 'Failed to delete calculation run' });
   }
 });
 
