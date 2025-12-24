@@ -1,6 +1,7 @@
 // backend/src/server.ts
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import dotenv from 'dotenv';
 import path from 'path';
 import { pool } from './db';
@@ -23,6 +24,7 @@ const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 
 // Middleware
 app.use(cors());
+app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 
 // Simple health check

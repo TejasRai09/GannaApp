@@ -130,7 +130,12 @@ const AppContent: React.FC = () => {
         if (!currentUser || currentUser.role === 'superadmin' || !token) return;
         try {
             console.log('[loadOrgData] start');
-            const dataResp = await fetchOrgData(token);
+            const [dataResp, calcResp, ticketResp] = await Promise.all([
+                fetchOrgData(token),
+                fetchCalculations(token),
+                fetchMyOrgTickets(token),
+            ]);
+
             const files = dataResp.files || [];
             console.log('[loadOrgData] files', files.length, files[0]);
             const parseJson = (val: any) => {
@@ -154,11 +159,11 @@ const AppContent: React.FC = () => {
             setBondingData(parseFile('bonding'));
             setIndentData(parseFile('indent'));
             setPurchaseData(parseFile('purchase'));
-            const calcResp = await fetchCalculations(token);
+
             console.log('[loadOrgData] calc runs len', calcResp?.runs?.length, 'sample', calcResp?.runs?.[0]);
             const runs = (calcResp.runs || []).map(mapCalculationRun);
             setCalculationHistory(runs);
-            const ticketResp = await fetchMyOrgTickets(token);
+
             setSupportTickets((ticketResp.tickets || []).map(mapTicket));
         } catch (e: any) {
             console.error('[loadOrgData] error', e);
