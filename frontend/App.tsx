@@ -371,6 +371,7 @@ const AppContent: React.FC = () => {
                             if (!replaced.find(r => r.id === saved.id)) return [saved, ...prev.filter(r => r.id !== newRun.id)];
                             return replaced;
                         });
+                        setActiveCalculationId(saved.id);
                     }
                 } catch (e) {
                     console.warn('Failed to persist calculation to backend', e);
