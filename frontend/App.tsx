@@ -19,9 +19,9 @@ import { fetchOrgData, saveOrgData } from './services/orgDataService';
 import { fetchCalculations, saveCalculation, deleteCalculation } from './services/calculationsService';
 import { createTicket, fetchAllTickets, fetchMyOrgTickets, updateTicketStatus } from './services/supportService';
 // FIX: Update import for CalculationInputs
-import type { Bonding, Indent, Purchase, CalculationRun, StoredData, User, SupportTicket, SupportTicketStatus, CalculationInputs, Constraint } from './types';
+import type { Bonding, Indent, Purchase, CalculationRun, StoredData, User, SupportTicket, SupportTicketStatus, CalculationInputs, Constraint, YardBalanceRow } from './types';
 import { generateId } from './utils/utils';
-import { isSameDay } from './services/dateUtils';
+import { isSameDay, parseDate } from './services/dateUtils';
 
 export type Page = 'home' | 'login' | 'signup' | 'dashboard' | 'calculator' | 'history' | 'help' | 'superadmin' | 'team' | 'pricing' | 'branding';
 export type DataType = 'bonding' | 'indent' | 'purchase';
@@ -40,6 +40,7 @@ const AppContent: React.FC = () => {
     const [bondingData, setBondingData] = useState<StoredData<Bonding> | null>(null);
     const [indentData, setIndentData] = useState<StoredData<Indent> | null>(null);
     const [purchaseData, setPurchaseData] = useState<StoredData<Purchase> | null>(null);
+    const [yardBalanceData, setYardBalanceData] = useState<StoredData<YardBalanceRow> | null>(null);
     const [calculationHistory, setCalculationHistory] = useState<CalculationRun[]>([]);
     
     // Global data state
@@ -52,10 +53,10 @@ const AppContent: React.FC = () => {
     const [plantCapacity, setPlantCapacity] = useState<number>(80);
     const [totalDailyRequirement, setTotalDailyRequirement] = useState<number>(100000);
     const [currentDate, setCurrentDate] = useState<string>(new Date().toISOString().split('T')[0]);
-    const [standardStockCentre, setStandardStockCentre] = useState<number>(30000);
-    const [standardStockGate, setStandardStockGate] = useState<number>(10000);
-    const [availableStockCentre, setAvailableStockCentre] = useState<number>(30000);
-    const [availableStockGate, setAvailableStockGate] = useState<number>(10000);
+    const [standardStockCentre, setStandardStockCentre] = useState<number>(6000);
+    const [standardStockGate, setStandardStockGate] = useState<number>(9000);
+    const [availableStockCentre, setAvailableStockCentre] = useState<number>(6000);
+    const [availableStockGate, setAvailableStockGate] = useState<number>(9000);
     const [constraints, setConstraints] = useState<Constraint[]>([]);
     
     const [activeCalculationId, setActiveCalculationId] = useState<string | null>(null);
@@ -159,6 +160,7 @@ const AppContent: React.FC = () => {
             setBondingData(parseFile('bonding'));
             setIndentData(parseFile('indent'));
             setPurchaseData(parseFile('purchase'));
+            setYardBalanceData(parseFile('yard_balance'));
 
             console.log('[loadOrgData] calc runs len', calcResp?.runs?.length, 'sample', calcResp?.runs?.[0]);
             const runs = (calcResp.runs || []).map(mapCalculationRun);
@@ -196,6 +198,30 @@ const AppContent: React.FC = () => {
             setPage('home');
         }
     }, [currentUser, loadOrgData]);
+
+    // Auto-populate available stock from the most recent yard balance entry on or before currentDate
+    useEffect(() => {
+        if (!yardBalanceData?.data?.length || !currentDate) return;
+        const target = new Date(currentDate + 'T00:00:00.000Z');
+        const entries = yardBalanceData.data
+            .map(r => {
+                const rawDate = (r as any).Date || (r as any).date || '';
+                const rawGate = (r as any).Gate ?? (r as any).gate ?? 0;
+                const rawCentre = (r as any).Centre ?? (r as any).centre ?? 0;
+                return {
+                    date: parseDate(String(rawDate)),
+                    gate: parseFloat(String(rawGate)) || 0,
+                    centre: parseFloat(String(rawCentre)) || 0,
+                };
+            })
+            .filter(e => e.date !== null)
+            .sort((a, b) => a.date!.getTime() - b.date!.getTime());
+        const match = [...entries].reverse().find(e => e.date!.getTime() <= target.getTime());
+        if (match) {
+            setAvailableStockGate(match.gate);
+            setAvailableStockCentre(match.centre);
+        }
+    }, [yardBalanceData, currentDate]);
 
     // Refresh history when navigating to the history page (in case another session added/deleted runs)
     useEffect(() => {
@@ -439,6 +465,35 @@ const AppContent: React.FC = () => {
         reader.readAsText(file);
     };
 
+    const handleYardBalanceFileUpdate = (file: File) => {
+        if (!token) return;
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const text = e.target?.result as string;
+                const parsedData = parseFileContent(text);
+                const storedObject: StoredData<YardBalanceRow> = {
+                    fileName: file.name,
+                    lastUpdated: new Date().toISOString(),
+                    data: parsedData as YardBalanceRow[],
+                };
+                await saveOrgData(token, 'yard_balance', file.name, parsedData);
+                setYardBalanceData(storedObject);
+                setError(null);
+            } catch (err: any) {
+                setError(`Error parsing ${file.name}: ${err.message}`);
+            }
+        };
+        reader.onerror = () => setError(`Error reading file ${file.name}.`);
+        reader.readAsText(file);
+    };
+
+    const handleDeleteYardBalance = () => {
+        if (!token) return;
+        setYardBalanceData(null);
+        saveOrgData(token, 'yard_balance', 'Cleared', []).catch(() => undefined);
+    };
+
     const handleDeleteData = (type: DataType | 'mapping') => {
         if (!token) return;
         if (type === 'bonding') {
@@ -516,10 +571,12 @@ const AppContent: React.FC = () => {
                 saveOrgData(token, 'bonding', 'Cleared', []).catch(() => undefined),
                 saveOrgData(token, 'indent', 'Cleared', []).catch(() => undefined),
                 saveOrgData(token, 'purchase', 'Cleared', []).catch(() => undefined),
+                saveOrgData(token, 'yard_balance', 'Cleared', []).catch(() => undefined),
             ]).finally(() => {
                 setBondingData(null);
                 setIndentData(null);
                 setPurchaseData(null);
+                setYardBalanceData(null);
                 setActiveCalculationId(null);
                 setCalculationHistory([]);
                 setInfo('All stored data for your organization has been cleared.');
@@ -533,6 +590,7 @@ const AppContent: React.FC = () => {
         setBondingData(null);
         setIndentData(null);
         setPurchaseData(null);
+        setYardBalanceData(null);
         setCalculationHistory([]);
         showToast('Signed out', 'info');
     };
@@ -629,7 +687,8 @@ const AppContent: React.FC = () => {
     if (page === 'dashboard') {
         return <DashboardPage
             onNavigate={navigate} onLogout={handleLogout} bondingData={bondingData}
-            indentData={indentData} purchaseData={purchaseData} calculationHistory={calculationHistory}
+            indentData={indentData} purchaseData={purchaseData} yardBalanceData={yardBalanceData}
+            calculationHistory={calculationHistory}
             infoMessage={info} onGoToCalculator={navigateToCalculator} onViewHistoryItem={handleViewHistoryItem}
             onClearAllData={handleClearAllData} seasonTotalDays={seasonTotalDays}
             seasonalCrushingCapacity={seasonalCrushingCapacity}
@@ -648,6 +707,8 @@ const AppContent: React.FC = () => {
             closeManualAppendModal={closeManualAppendModal}
             handleGridSave={handleGridSave}
             handleManualAppend={handleManualAppend}
+            handleYardBalanceFileUpload={handleYardBalanceFileUpdate}
+            handleDeleteYardBalance={handleDeleteYardBalance}
         />;
     }
     if (page === 'history') {

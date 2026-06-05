@@ -29,6 +29,14 @@ export const parseDate = (input: any): Date | null => {
         else if (/^\d{2}-\d{2}-\d{4}$/.test(trimmed)) {
             const [day, month, year] = trimmed.split('-');
             date = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+        }
+        // Check for DD/MM/YYYY (Indian/British locale from Excel export)
+        else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+            const parts = trimmed.split('/');
+            const day = parts[0].padStart(2, '0');
+            const month = parts[1].padStart(2, '0');
+            const year = parts[2];
+            date = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
         } else {
             date = new Date(trimmed);
         }

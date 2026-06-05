@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { X, CheckCircle, AlertTriangle, UploadCloud, Trash2, RefreshCw, FileText, Map as MapIcon, Database, Edit, PlusSquare } from 'lucide-react';
-import type { StoredData } from '../types';
+import type { StoredData, YardBalanceRow } from '../types';
 import type { DataType } from '../App';
 
 interface DataManagerModalProps {
@@ -9,12 +9,15 @@ interface DataManagerModalProps {
     bondingData: StoredData<any> | null;
     indentData: StoredData<any> | null;
     purchaseData: StoredData<any> | null;
+    yardBalanceData: StoredData<YardBalanceRow> | null;
     centerMapping: { [key: string]: string };
     onFileReplace: (key: DataType, file: File) => void;
     onMappingReplace: (file: File) => void;
     onDeleteData: (type: 'bonding' | 'indent' | 'purchase' | 'mapping') => void;
     onEdit: (type: 'bonding' | 'indent' | 'purchase') => void;
     onAppend: (type: 'indent' | 'purchase') => void;
+    onYardBalanceReplace: (file: File) => void;
+    onDeleteYardBalance: () => void;
 }
 
 interface DataRowProps {
@@ -86,16 +89,17 @@ const DataRow: React.FC<DataRowProps> = ({ label, icon, isLoaded, details, onRep
     </div>
 );
 
-export const DataManagerModal: React.FC<DataManagerModalProps> = ({ 
-    isOpen, onClose, 
-    bondingData, indentData, purchaseData, centerMapping,
+export const DataManagerModal: React.FC<DataManagerModalProps> = ({
+    isOpen, onClose,
+    bondingData, indentData, purchaseData, yardBalanceData, centerMapping,
     onFileReplace, onMappingReplace, onDeleteData,
-    onEdit, onAppend
+    onEdit, onAppend, onYardBalanceReplace, onDeleteYardBalance
 }) => {
     const bondingInputRef = useRef<HTMLInputElement>(null);
     const indentInputRef = useRef<HTMLInputElement>(null);
     const purchaseInputRef = useRef<HTMLInputElement>(null);
     const mappingInputRef = useRef<HTMLInputElement>(null);
+    const yardBalanceInputRef = useRef<HTMLInputElement>(null);
 
     React.useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -115,11 +119,13 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
     if (!isOpen) return null;
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'bonding' | 'indent' | 'purchase' | 'mapping') => {
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'bonding' | 'indent' | 'purchase' | 'mapping' | 'yard_balance') => {
         const file = e.target.files?.[0];
         if (file) {
             if (type === 'mapping') {
                 onMappingReplace(file);
+            } else if (type === 'yard_balance') {
+                onYardBalanceReplace(file);
             } else {
                 onFileReplace(type, file);
             }
@@ -192,9 +198,19 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
                     <div className="h-px bg-slate-200 my-4"></div>
 
-                    <DataRow 
-                        label="Center Mapping" 
-                        icon={<MapIcon size={20} />} 
+                    <DataRow
+                        label="Yard Balance"
+                        icon={<Database size={20} />}
+                        isLoaded={!!yardBalanceData}
+                        details={yardBalanceData ? `${yardBalanceData.data.length} records • ${yardBalanceData.fileName}` : 'Upload to auto-fill available stock (CSV: Date, Gate, Centre)'}
+                        onReplace={() => yardBalanceInputRef.current?.click()}
+                        onDelete={onDeleteYardBalance}
+                        deleteLabel="Remove Yard Balance"
+                    />
+
+                    <DataRow
+                        label="Center Mapping"
+                        icon={<MapIcon size={20} />}
                         isLoaded={!isDefaultMapping}
                         details={isDefaultMapping ? 'Using System Default Mapping' : `${Object.keys(centerMapping).length} custom rules defined`}
                         onReplace={() => mappingInputRef.current?.click()}
@@ -207,6 +223,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                     <input type="file" ref={indentInputRef} className="hidden" accept=".csv" onChange={(e) => handleFileChange(e, 'indent')} />
                     <input type="file" ref={purchaseInputRef} className="hidden" accept=".csv" onChange={(e) => handleFileChange(e, 'purchase')} />
                     <input type="file" ref={mappingInputRef} className="hidden" accept=".csv" onChange={(e) => handleFileChange(e, 'mapping')} />
+                    <input type="file" ref={yardBalanceInputRef} className="hidden" accept=".csv" onChange={(e) => handleFileChange(e, 'yard_balance')} />
                 </div>
                 
                 <footer className="flex justify-end p-4 border-t bg-slate-50 rounded-b-xl">

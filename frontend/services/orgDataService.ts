@@ -1,6 +1,6 @@
 import { apiFetch } from './apiClient';
 
-export type OrgDataKind = 'bonding' | 'indent' | 'purchase';
+export type OrgDataKind = 'bonding' | 'indent' | 'purchase' | 'yard_balance';
 
 export interface OrgDataFile<T> {
   id?: number;

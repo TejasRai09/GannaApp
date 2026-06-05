@@ -53,6 +53,12 @@ export interface SupportTicket {
 }
 
 
+export interface YardBalanceRow {
+    Date: string;
+    Gate: string;
+    Centre: string;
+}
+
 export interface Bonding {
     Code: string;
     Center: string;

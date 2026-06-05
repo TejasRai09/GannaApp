@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import type { Page, DataType } from '../App';
-import type { CalculationRun, StoredData, Bonding } from '../types';
+import type { CalculationRun, StoredData, Bonding, YardBalanceRow } from '../types';
 import { CheckCircle, Info, Calculator, History, Newspaper, Database, AlertCircle } from 'lucide-react';
 import { ConsolidatedSummary } from '../components/ConsolidatedSummary';
 import { Header } from '../components/common/Header';
@@ -19,6 +19,7 @@ interface DashboardProps {
     bondingData: StoredData<Bonding> | null;
     indentData: StoredData<any> | null;
     purchaseData: StoredData<any> | null;
+    yardBalanceData: StoredData<YardBalanceRow> | null;
     calculationHistory: CalculationRun[];
     infoMessage: string | null;
     seasonTotalDays: number;
@@ -39,17 +40,20 @@ interface DashboardProps {
     closeManualAppendModal: () => void;
     handleGridSave: (updatedData: any[], dataType: DataType) => void;
     handleManualAppend: (newRecords: any[], dataType: 'indent' | 'purchase') => void;
+    handleYardBalanceFileUpload: (file: File) => void;
+    handleDeleteYardBalance: () => void;
 }
 
 export const DashboardPage: React.FC<DashboardProps> = (props) => {
-    const { 
+    const {
         onNavigate, onLogout, onGoToCalculator, onViewHistoryItem,
-        bondingData, indentData, purchaseData, calculationHistory, infoMessage,
+        bondingData, indentData, purchaseData, yardBalanceData, calculationHistory, infoMessage,
         seasonTotalDays, seasonalCrushingCapacity, centerMapping,
         handleFileUpdate, handleMappingFileUpload, handleDeleteData,
         openDataGridModal, openManualAppendModal,
         dataGridModal, manualAppendModal, closeDataGridModal, closeManualAppendModal,
-        handleGridSave, handleManualAppend
+        handleGridSave, handleManualAppend,
+        handleYardBalanceFileUpload, handleDeleteYardBalance
     } = props;
     
     const [isDataModalOpen, setIsDataModalOpen] = useState(false);
@@ -197,12 +201,15 @@ export const DashboardPage: React.FC<DashboardProps> = (props) => {
                 bondingData={bondingData}
                 indentData={indentData}
                 purchaseData={purchaseData}
+                yardBalanceData={yardBalanceData}
                 centerMapping={centerMapping}
                 onFileReplace={onFileReplace}
                 onMappingReplace={handleMappingFileUpload}
                 onDeleteData={handleDeleteData}
                 onEdit={(type) => openDataGridModal(type as DataType)}
                 onAppend={(type) => openManualAppendModal(type as 'indent' | 'purchase')}
+                onYardBalanceReplace={handleYardBalanceFileUpload}
+                onDeleteYardBalance={handleDeleteYardBalance}
             />
             
             <DataGridModal 

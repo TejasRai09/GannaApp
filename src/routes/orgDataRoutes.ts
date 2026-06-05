@@ -6,7 +6,7 @@ import { requireAuth, AuthRequest } from '../middleware/authMiddleware';
 const router = Router();
 
 // Utility – validate type param
-const ALLOWED_TYPES = ['BONDING', 'INDENT', 'PURCHASE'] as const;
+const ALLOWED_TYPES = ['BONDING', 'INDENT', 'PURCHASE', 'YARD_BALANCE'] as const;
 type DataType = (typeof ALLOWED_TYPES)[number];
 
 const normalizeType = (raw: string): DataType | null => {
