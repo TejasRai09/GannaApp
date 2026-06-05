@@ -86,14 +86,14 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
 
 /**
  * GET /api/calculations/my-org
- * Returns all runs for the current user’s organization
+ * Returns all runs for the current user’s organization (without results_json for speed)
  */
-router.get('/my-org', requireAuth, async (req: AuthRequest, res) => {
+router.get(‘/my-org’, requireAuth, async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
 
     const [rows]: any = await pool.query(
-      `SELECT id, org_id, user_id, name, inputs_json, results_json, created_at
+      `SELECT id, org_id, user_id, name, inputs_json, created_at
        FROM calculation_runs
        WHERE org_id = ?
        ORDER BY created_at DESC`,
@@ -102,8 +102,36 @@ router.get('/my-org', requireAuth, async (req: AuthRequest, res) => {
 
     res.json({ ok: true, runs: rows });
   } catch (err) {
-    console.error('Error loading calculation runs:', err);
-    res.status(500).json({ ok: false, error: 'Failed to load calculation runs' });
+    console.error(‘Error loading calculation runs:’, err);
+    res.status(500).json({ ok: false, error: ‘Failed to load calculation runs’ });
+  }
+});
+
+/**
+ * GET /api/calculations/:id
+ * Returns a single run with full results_json
+ */
+router.get(‘/:id’, requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const user = req.user!;
+    const { id } = req.params;
+
+    const [rows]: any = await pool.query(
+      `SELECT id, org_id, user_id, name, inputs_json, results_json, created_at
+       FROM calculation_runs
+       WHERE id = ? AND org_id = ?
+       LIMIT 1`,
+      [id, user.orgId]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ ok: false, error: ‘Calculation not found’ });
+    }
+
+    res.json({ ok: true, run: rows[0] });
+  } catch (err) {
+    console.error(‘Error loading calculation run:’, err);
+    res.status(500).json({ ok: false, error: ‘Failed to load calculation run’ });
   }
 });
 

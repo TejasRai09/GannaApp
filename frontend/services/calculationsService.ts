@@ -13,6 +13,10 @@ export async function fetchCalculations(token: string) {
   return apiFetch<{ ok: boolean; runs: any[] }>(`/api/calculations/my-org`, { token });
 }
 
+export async function fetchCalculation(token: string, runId: string) {
+  return apiFetch<{ ok: boolean; run: any }>(`/api/calculations/${encodeURIComponent(runId)}`, { token });
+}
+
 export async function deleteCalculation(token: string, runId: string) {
   return apiFetch(`/api/calculations/${encodeURIComponent(runId)}`, {
     method: 'DELETE',

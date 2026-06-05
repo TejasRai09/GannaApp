@@ -16,7 +16,7 @@ import { calculateRecommendedIndents } from './services/calculationService';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { fetchOrgData, saveOrgData } from './services/orgDataService';
-import { fetchCalculations, saveCalculation, deleteCalculation } from './services/calculationsService';
+import { fetchCalculations, fetchCalculation, saveCalculation, deleteCalculation } from './services/calculationsService';
 import { createTicket, fetchAllTickets, fetchMyOrgTickets, updateTicketStatus } from './services/supportService';
 // FIX: Update import for CalculationInputs
 import type { Bonding, Indent, Purchase, CalculationRun, StoredData, User, SupportTicket, SupportTicketStatus, CalculationInputs, Constraint, YardBalanceRow } from './types';
@@ -364,14 +364,12 @@ const AppContent: React.FC = () => {
                 try {
                     const resp = await saveCalculation(token, newRun.name, inputs, results);
                     if (resp?.run) {
-                        const saved = mapCalculationRun(resp.run);
-                        setCalculationHistory(prev => {
-                            const replaced = prev.map(r => r.id === newRun.id ? saved : r);
-                            // If not found (edge), prepend
-                            if (!replaced.find(r => r.id === saved.id)) return [saved, ...prev.filter(r => r.id !== newRun.id)];
-                            return replaced;
-                        });
-                        setActiveCalculationId(saved.id);
+                        const dbId = String(resp.run.id);
+                        // Keep the in-memory results (already correct) — just swap the temp ID for the DB ID
+                        setCalculationHistory(prev =>
+                            prev.map(r => r.id === newRun.id ? { ...r, id: dbId } : r)
+                        );
+                        setActiveCalculationId(dbId);
                     }
                 } catch (e) {
                     console.warn('Failed to persist calculation to backend', e);
@@ -596,9 +594,26 @@ const AppContent: React.FC = () => {
         showToast('Signed out', 'info');
     };
     
-    const handleViewHistoryItem = (id: string) => {
-        setActiveCalculationId(id);
+    const handleViewHistoryItem = async (id: string) => {
         setPage('calculator');
+        // If results are already in memory, just activate it
+        const existing = calculationHistory.find(r => r.id === id);
+        if (existing?.results?.tableData?.length) {
+            setActiveCalculationId(id);
+            return;
+        }
+        // Otherwise fetch full results from backend
+        if (!token) return;
+        try {
+            const resp = await fetchCalculation(token, id);
+            if (resp?.run) {
+                const full = mapCalculationRun(resp.run);
+                setCalculationHistory(prev => prev.map(r => r.id === id ? full : r));
+            }
+        } catch (e) {
+            console.warn('Failed to fetch full calculation', e);
+        }
+        setActiveCalculationId(id);
     };
 
     const handleDeleteHistoryItem = async (id: string) => {
