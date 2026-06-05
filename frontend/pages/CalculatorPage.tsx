@@ -90,7 +90,10 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = (props) => {
             setMaxReachedStep(4);
             return;
         }
-        
+
+        // Don't reset the step while a calculation is running
+        if (props.isLoading) return;
+
         if (allFilesUploaded) {
             setStep(2);
             setMaxReachedStep(2);
@@ -101,7 +104,7 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = (props) => {
             }, 500);
             return () => clearTimeout(timer);
         }
-    }, [props.activeCalculation, allFilesUploaded, hasShownIntro]);
+    }, [props.activeCalculation, allFilesUploaded, hasShownIntro, props.isLoading]);
 
     useEffect(() => {
         if (step > maxReachedStep) {
