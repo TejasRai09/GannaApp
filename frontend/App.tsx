@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
@@ -60,6 +60,7 @@ const AppContent: React.FC = () => {
     const [constraints, setConstraints] = useState<Constraint[]>([]);
     
     const [activeCalculationId, setActiveCalculationId] = useState<string | null>(null);
+    const fetchedRunIds = useRef(new Set<string>());
 
     const [error, setError] = useState<string | null>(null);
     const [info, setInfo] = useState<string | null>(null);
@@ -224,18 +225,48 @@ const AppContent: React.FC = () => {
     }, [yardBalanceData, currentDate]);
 
     // Refresh history when navigating to the history page (in case another session added/deleted runs)
+    // Merges DB runs with in-memory results so the active calculation doesn't lose its data.
     useEffect(() => {
         const refreshHistory = async () => {
             if (page !== 'history' || !token || !currentUser || currentUser.role === 'superadmin') return;
             try {
                 const calcResp = await fetchCalculations(token);
-                setCalculationHistory((calcResp.runs || []).map(mapCalculationRun));
+                const newRuns = (calcResp.runs || []).map(mapCalculationRun);
+                const newIds = new Set(newRuns.map((r: CalculationRun) => r.id));
+                setCalculationHistory(prev => {
+                    // Preserve in-memory results; keep memory-only runs (temp IDs) at the end
+                    const merged = newRuns.map((nr: CalculationRun) => {
+                        const existing = prev.find(r => r.id === nr.id);
+                        return (existing?.results?.tableData?.length ?? 0) > 0 ? existing! : nr;
+                    });
+                    const memoryOnly = prev.filter(r => !newIds.has(r.id));
+                    return [...merged, ...memoryOnly];
+                });
             } catch (e: any) {
                 setError(e?.message || 'Failed to load history');
             }
         };
         refreshHistory();
     }, [page, token, currentUser, mapCalculationRun]);
+
+    // Auto-fetch full results when activeCalculationId points to a run with empty tableData.
+    // This handles: viewing history items loaded without results_json, or results lost after history refresh.
+    useEffect(() => {
+        if (!activeCalculationId || !token) return;
+        if (fetchedRunIds.current.has(activeCalculationId)) return;
+        const active = calculationHistory.find(r => r.id === activeCalculationId);
+        if (!active || (active.results?.tableData?.length ?? 0) > 0) return;
+
+        fetchedRunIds.current.add(activeCalculationId);
+        fetchCalculation(token, activeCalculationId)
+            .then(resp => {
+                if (resp?.run) {
+                    const full = mapCalculationRun(resp.run);
+                    setCalculationHistory(prev => prev.map(r => r.id === activeCalculationId ? full : r));
+                }
+            })
+            .catch(() => {});
+    }, [activeCalculationId, token, calculationHistory, mapCalculationRun]);
     
     const openDataGridModal = (dataType: DataType) => {
         const dataMap = {
@@ -288,9 +319,6 @@ const AppContent: React.FC = () => {
         setError(null);
         setInfo(null);
         setIsLoading(true);
-        // If it's a scenario, we don't reset the ID yet because we might be viewing the base run
-        // But eventually we will switch to the new scenario.
-        setActiveCalculationId(null);
         
         try {
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -594,26 +622,10 @@ const AppContent: React.FC = () => {
         showToast('Signed out', 'info');
     };
     
-    const handleViewHistoryItem = async (id: string) => {
+    const handleViewHistoryItem = (id: string) => {
         setPage('calculator');
-        // If results are already in memory, just activate it
-        const existing = calculationHistory.find(r => r.id === id);
-        if (existing?.results?.tableData?.length) {
-            setActiveCalculationId(id);
-            return;
-        }
-        // Otherwise fetch full results from backend
-        if (!token) return;
-        try {
-            const resp = await fetchCalculation(token, id);
-            if (resp?.run) {
-                const full = mapCalculationRun(resp.run);
-                setCalculationHistory(prev => prev.map(r => r.id === id ? full : r));
-            }
-        } catch (e) {
-            console.warn('Failed to fetch full calculation', e);
-        }
         setActiveCalculationId(id);
+        // The auto-fetch useEffect will load full results from DB if they're not in memory
     };
 
     const handleDeleteHistoryItem = async (id: string) => {
@@ -628,7 +640,16 @@ const AppContent: React.FC = () => {
             console.log('[history] delete API success', { id });
             const calcResp = await fetchCalculations(token);
             console.log('[history] reload after delete', { count: calcResp?.runs?.length });
-            setCalculationHistory((calcResp.runs || []).map(mapCalculationRun));
+            const newRuns = (calcResp.runs || []).map(mapCalculationRun);
+            const newIds = new Set(newRuns.map((r: CalculationRun) => r.id));
+            setCalculationHistory(prev => {
+                const merged = newRuns.map((nr: CalculationRun) => {
+                    const existing = prev.find(r => r.id === nr.id);
+                    return (existing?.results?.tableData?.length ?? 0) > 0 ? existing! : nr;
+                });
+                const memoryOnly = prev.filter(r => !newIds.has(r.id));
+                return [...merged, ...memoryOnly];
+            });
             showToast('Calculation deleted', 'success');
         } catch (e: any) {
             console.error('[history] delete failed', e);
@@ -636,7 +657,16 @@ const AppContent: React.FC = () => {
             try {
                 const calcResp = await fetchCalculations(token);
                 console.log('[history] reload after delete failure', { count: calcResp?.runs?.length });
-                setCalculationHistory((calcResp.runs || []).map(mapCalculationRun));
+                const fallbackRuns = (calcResp.runs || []).map(mapCalculationRun);
+                const fallbackIds = new Set(fallbackRuns.map((r: CalculationRun) => r.id));
+                setCalculationHistory(prev => {
+                    const merged = fallbackRuns.map((nr: CalculationRun) => {
+                        const existing = prev.find(r => r.id === nr.id);
+                        return (existing?.results?.tableData?.length ?? 0) > 0 ? existing! : nr;
+                    });
+                    const memoryOnly = prev.filter(r => !fallbackIds.has(r.id));
+                    return [...merged, ...memoryOnly];
+                });
             } catch (_) {
                 // ignore secondary failure
             }
