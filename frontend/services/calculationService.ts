@@ -478,7 +478,13 @@ export const calculateRecommendedIndents = (inputs: CalculationInputs): Calculat
 
     // ---------------------------------------------
 
-    const totalIndentQty = nIndents.reduce((sum, i) => sum + i.qty, 0);
+    // Overrun = total season purchases / closed indent qty - 1
+    // Denominator: only "closed" indents (raisedFor <= T-4, fully received with all D-purchases)
+    // Numerator: ALL purchases in the season (matching Excel formula)
+    const t_minus_4_overrun = addDays(currentDate, -4);
+    const totalIndentQty = nIndents
+        .filter(i => i.raisedFor >= plantStartDate && i.raisedFor <= t_minus_4_overrun)
+        .reduce((sum, i) => sum + i.qty, 0);
     const totalPurchaseQty = nPurchases.reduce((sum, p) => sum + p.qty, 0);
     const overrunPercentage = totalIndentQty > 0 ? (totalPurchaseQty / totalIndentQty) - 1 : 0;
 
