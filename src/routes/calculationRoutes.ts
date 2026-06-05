@@ -7,7 +7,6 @@ const router = Router();
 /**
  * POST /api/calculations
  * Body: { name: string, inputs: any, results: any }
- * Saves a calculation run for the current user + org
  */
 router.post('/', requireAuth, async (req: AuthRequest, res) => {
   try {
@@ -21,23 +20,14 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
     const [result]: any = await pool.query(
       `INSERT INTO calculation_runs (org_id, user_id, name, inputs_json, results_json)
        VALUES (?, ?, ?, ?, ?)`,
-      [
-        user.orgId,
-        user.id,
-        name,
-        JSON.stringify(inputs),
-        JSON.stringify(results),
-      ]
+      [user.orgId, user.id, name, JSON.stringify(inputs), JSON.stringify(results)]
     );
 
     const insertedId = result.insertId;
 
-    // Return the inserted run (single row) for client to sync ids
     const [rows]: any = await pool.query(
-      `SELECT id, org_id, user_id, name, inputs_json, results_json, created_at
-       FROM calculation_runs
-       WHERE id = ?
-       LIMIT 1`,
+      `SELECT id, org_id, user_id, name, inputs_json, created_at
+       FROM calculation_runs WHERE id = ? LIMIT 1`,
       [insertedId]
     );
 
@@ -50,7 +40,6 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
 
 /**
  * DELETE /api/calculations/:id
- * Removes a calculation run scoped to the caller's organization.
  */
 router.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
   try {
@@ -61,7 +50,6 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
       return res.status(400).json({ ok: false, error: 'Missing calculation id' });
     }
 
-    // Ensure the run belongs to caller's org
     const [rows]: any = await pool.query(
       `SELECT id FROM calculation_runs WHERE id = ? AND org_id = ? LIMIT 1`,
       [id, user.orgId]
@@ -71,7 +59,10 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
       return res.status(404).json({ ok: false, error: 'Calculation not found' });
     }
 
-    const [delResult]: any = await pool.query(`DELETE FROM calculation_runs WHERE id = ?`, [id]);
+    const [delResult]: any = await pool.query(
+      `DELETE FROM calculation_runs WHERE id = ?`,
+      [id]
+    );
 
     if (!delResult || delResult.affectedRows === 0) {
       return res.status(404).json({ ok: false, error: 'Calculation not found' });
@@ -86,9 +77,9 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
 
 /**
  * GET /api/calculations/my-org
- * Returns all runs for the current user’s organization (without results_json for speed)
+ * Returns all runs without results_json for fast loading
  */
-router.get(‘/my-org’, requireAuth, async (req: AuthRequest, res) => {
+router.get('/my-org', requireAuth, async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
 
@@ -102,8 +93,8 @@ router.get(‘/my-org’, requireAuth, async (req: AuthRequest, res) => {
 
     res.json({ ok: true, runs: rows });
   } catch (err) {
-    console.error(‘Error loading calculation runs:’, err);
-    res.status(500).json({ ok: false, error: ‘Failed to load calculation runs’ });
+    console.error('Error loading calculation runs:', err);
+    res.status(500).json({ ok: false, error: 'Failed to load calculation runs' });
   }
 });
 
@@ -111,7 +102,7 @@ router.get(‘/my-org’, requireAuth, async (req: AuthRequest, res) => {
  * GET /api/calculations/:id
  * Returns a single run with full results_json
  */
-router.get(‘/:id’, requireAuth, async (req: AuthRequest, res) => {
+router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
     const { id } = req.params;
@@ -119,19 +110,18 @@ router.get(‘/:id’, requireAuth, async (req: AuthRequest, res) => {
     const [rows]: any = await pool.query(
       `SELECT id, org_id, user_id, name, inputs_json, results_json, created_at
        FROM calculation_runs
-       WHERE id = ? AND org_id = ?
-       LIMIT 1`,
+       WHERE id = ? AND org_id = ? LIMIT 1`,
       [id, user.orgId]
     );
 
     if (!rows || rows.length === 0) {
-      return res.status(404).json({ ok: false, error: ‘Calculation not found’ });
+      return res.status(404).json({ ok: false, error: 'Calculation not found' });
     }
 
     res.json({ ok: true, run: rows[0] });
   } catch (err) {
-    console.error(‘Error loading calculation run:’, err);
-    res.status(500).json({ ok: false, error: ‘Failed to load calculation run’ });
+    console.error('Error loading calculation run:', err);
+    res.status(500).json({ ok: false, error: 'Failed to load calculation run' });
   }
 });
 
