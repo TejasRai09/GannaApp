@@ -1,6 +1,11 @@
 CREATE DATABASE IF NOT EXISTS ganna;
 USE ganna;
 
+-- Tables are listed alphabetically, so calculation_runs references organizations
+-- and users before they exist. Defer constraint checking until the whole file has
+-- loaded; MySQL validates the foreign keys when checks are re-enabled at the end.
+SET FOREIGN_KEY_CHECKS = 0;
+
 CREATE TABLE `calculation_runs` (
   `id` int NOT NULL AUTO_INCREMENT,
   `org_id` int NOT NULL,
@@ -68,3 +73,5 @@ CREATE TABLE `users` (
   CONSTRAINT `fk_users_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
+SET FOREIGN_KEY_CHECKS = 1;

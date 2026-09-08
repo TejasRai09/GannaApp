@@ -15,3 +15,9 @@ _replay/season_data/
 _replay/*.png
 _replay/full_*.csv
 _replay/mlModel.js
+
+# SSH keys - never commit
+*.pem
+*.ppk
+id_rsa
+id_ed25519
