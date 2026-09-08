@@ -22,6 +22,19 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 
+// Fail fast on a misconfigured production server. Checking at boot (rather than on the
+// first login) means a bad deploy is caught by deploy.sh's health check, not by a user.
+if (process.env.NODE_ENV === 'production') {
+  const missing = ['JWT_SECRET', 'DB_PASSWORD'].filter((k) => !process.env[k]);
+  if (missing.length) {
+    console.error(
+      `FATAL: missing required env var(s) in production: ${missing.join(', ')}.\n` +
+      `Set them in .env (see .env.example). Generate a secret with: openssl rand -base64 48`
+    );
+    process.exit(1);
+  }
+}
+
 // Middleware
 app.use(cors());
 app.use(compression());
@@ -60,10 +73,7 @@ app.get(/^\/(?!api).*/, (req, res) => {
   res.sendFile(path.join(frontendDist, 'index.html'));
 });
 // Start server
-// app.listen(PORT, () => {
-//   console.log(`Backend running on http://localhost:${PORT}`);
-// });
-app.listen(4000, "0.0.0.0", () => {
-    console.log("Server running on http://0.0.0.0:4000");
+app.listen(Number(PORT), "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
 });
 

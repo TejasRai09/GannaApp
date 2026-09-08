@@ -1,0 +1,32 @@
+# GannaApp — systemd unit
+# Install:  sudo cp deploy/gannaapp.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now gannaapp
+[Unit]
+Description=GannaApp (sugarcane indent planning)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/GannaApp
+EnvironmentFile=/home/ubuntu/GannaApp/.env
+ExecStart=/usr/bin/node /home/ubuntu/GannaApp/dist/server.js
+
+# Restart on crash, but back off so a boot loop does not thrash the box
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Logs go to the journal:  sudo journalctl -u gannaapp -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gannaapp
+
+# Basic hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

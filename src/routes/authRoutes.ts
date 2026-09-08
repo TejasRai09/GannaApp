@@ -23,7 +23,7 @@ router.post('/signup', async (req, res) => {
 
     // Insert user
     const [result]: any = await pool.query(
-      `INSERT INTO users (org_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, 'member')`,
+      `INSERT INTO users (org_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, 'user')`,
       [orgId, name, email, passwordHash]
     );
 
@@ -62,6 +62,11 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Invalid credentials' });
     }
 
+    // In production a real secret is mandatory — never fall back silently.
+    if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+      console.error('FATAL: JWT_SECRET is not set');
+      return res.status(500).json({ error: 'Server misconfigured' });
+    }
     const jwtSecret: Secret = process.env.JWT_SECRET || 'default-secret';
     const signOptions: SignOptions = {
   // 7 days in seconds
