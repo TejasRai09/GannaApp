@@ -72,8 +72,14 @@ app.use(express.static(frontendDist));
 app.get(/^\/(?!api).*/, (req, res) => {
   res.sendFile(path.join(frontendDist, 'index.html'));
 });
-// Start server
-app.listen(Number(PORT), "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+// Start server.
+// In production nginx is the only thing that should reach Node, so bind to loopback —
+// that way port 4000 is unreachable from outside even if the firewall is misconfigured.
+// In development bind all interfaces so the app is reachable from other devices on the LAN.
+const BIND_HOST =
+  process.env.BIND_HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0');
+
+app.listen(Number(PORT), BIND_HOST, () => {
+    console.log(`Server running on http://${BIND_HOST}:${PORT}`);
 });
 

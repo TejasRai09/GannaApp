@@ -60,7 +60,7 @@ cat <<'DONE'
 Server setup complete.
 
 Next steps:
-  1. Create the environment file:   cp deploy/.env.example .env  &&  nano .env
+  1. Create the environment file:   cp .env.example .env  &&  nano .env
      - set a STRONG JWT_SECRET   (openssl rand -base64 48)
      - set DB_PASSWORD to match what you used above
      - set NODE_ENV=production
