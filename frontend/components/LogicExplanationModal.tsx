@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { X, ArrowRight, TrendingUp, BarChart3, TestTube2, Target } from 'lucide-react';
+import { X, TrendingUp, BarChart3, TestTube2, Target, Sparkles, Moon } from 'lucide-react';
 
 interface LogicExplanationModalProps {
     isOpen: boolean;
@@ -14,12 +14,6 @@ const Step: React.FC<{ icon: React.ReactNode, title: string, children: React.Rea
       <div className="text-sm text-slate-600 space-y-2 mt-1">{children}</div>
     </div>
   </div>
-);
-
-const Arrow: React.FC = () => (
-    <div className="flex justify-center items-center my-2 md:my-0">
-        <ArrowRight size={24} className="text-slate-400 rotate-90 md:rotate-0" />
-    </div>
 );
 
 export const LogicExplanationModal: React.FC<LogicExplanationModalProps> = ({ isOpen, onClose }) => {
@@ -48,63 +42,75 @@ export const LogicExplanationModal: React.FC<LogicExplanationModalProps> = ({ is
     }
 
     return (
-        <div 
+        <div
             className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4"
             onClick={onClose}
             role="dialog"
             aria-modal="true"
             aria-labelledby="logic-modal-title"
         >
-            <div 
+            <div
                 className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col"
                 onClick={(e) => e.stopPropagation()}
             >
                 <header className="flex justify-between items-center p-4 border-b">
-                    <h2 id="logic-modal-title" className="text-xl font-bold text-slate-800">Calculation Logic Walkthrough</h2>
+                    <div>
+                        <h2 id="logic-modal-title" className="text-xl font-bold text-slate-800">How the Recommendation Is Calculated</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                            Every number can be traced through these six steps. The app always shows two figures side by side:
+                            the classical <strong>Excel Model</strong> value and the improved <strong>ML Recommended</strong> value.
+                        </p>
+                    </div>
                     <button onClick={onClose} className="p-1 rounded-full text-slate-500 hover:bg-slate-100" aria-label="Close modal">
                         <X size={24} />
                     </button>
                 </header>
 
                 <div className="p-6 overflow-y-auto">
-                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <Step icon={<TestTube2 size={24} />} title="1. Maturity Weights (D1-D4)">
-                           <p>Analyzes recent closed indents to find the historical arrival pattern for each center. The weights represent the percentage of an indent that arrives on a specific day relative to its <strong>Indent Date</strong>:</p>
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <Step icon={<TestTube2 size={24} />} title="1. How cane arrives (D1–D4)">
+                           <p>An order is never delivered all at once — it dribbles in over about four days. From each centre's recent completed orders, the app learns its delivery pattern:</p>
                            <ul className="list-disc list-inside text-xs mt-1 space-y-1">
-                               <li><strong>D1:</strong> Arriving on or before the Indent Date (Day ≤ 0).</li>
-                               <li><strong>D2:</strong> Arriving 1 day after (Day +1).</li>
-                               <li><strong>D3:</strong> Arriving 2 days after (Day +2).</li>
-                               <li><strong>D4:</strong> Arriving 3 or more days after (Day ≥ +3).</li>
+                               <li><strong>D1</strong> — share arriving on the delivery day itself</li>
+                               <li><strong>D2</strong> — share arriving 1 day late</li>
+                               <li><strong>D3</strong> — share arriving 2 days late</li>
+                               <li><strong>D4</strong> — share arriving 3+ days late</li>
                            </ul>
-                           <p className="mt-2">These weights are determined using a conditional average to ensure stability, and a center's specific D1 weight is crucial for calculating the final indent.</p>
-                        </Step>
-                        
-                        <Step icon={<TrendingUp size={24} />} title="2. Plant Overrun">
-                           <p>Checks if the plant historically receives more or less cane than indented across all centers.</p>
-                           <p>Calculated as: <br/><code>(Total Purchases / Total Indents) - 1</code>.</p>
-                           <p>A positive value means more cane arrives than indented.</p>
+                           <p className="text-xs mt-1">If a centre's recent data is too thin, its full-season pattern is used instead.</p>
                         </Step>
 
-                        <Step icon={<BarChart3 size={24} />} title="3. Forecast (T+3)">
-                           <p>The system predicts arrivals for T+3 by summing up expected portions from previously placed indents:</p>
-                           <ul className="list-disc list-inside text-xs mt-1 space-y-1">
-                               <li>The <strong>D2</strong> portion of the indent <strong>for T+2</strong></li>
-                               <li>The <strong>D3</strong> portion of the indent <strong>for T+1</strong></li>
-                               <li>The <strong>D4</strong> portion of the indent <strong>for T (Today)</strong></li>
-                           </ul>
+                        <Step icon={<Sparkles size={24} />} title="2. Predicting the delivery rate">
+                           <p>The key uncertainty: <em>“if we order 1,000 qtl, how much will actually come?”</em></p>
+                           <p>A model trained on <strong>four seasons</strong> of this mill's own records predicts this per centre, per day, from 13 signals — week of the season, the farm calendar (mustard/wheat harvest, planting, festivals, rain), gate vs village centre, and the centre's recent delivery trend.</p>
+                           <p className="text-xs">Fully transparent: hover any ML value to see the predicted rate behind it.</p>
                         </Step>
 
-                        <Step icon={<Target size={24} />} title="4. Recommended Indent">
-                            <p>This is the final calculation, performed for each center:</p>
-                            <ol className="list-decimal list-inside space-y-1 pl-1">
-                                <li>The <strong>Effective Requirement</strong> is distributed by bonding %.</li>
-                                <li>Stock balances for <strong>Gate</strong> and <strong>Centre</strong> are added proportionally to their respective centers to get the 'Adjusted' value.</li>
-                                <li>Subtract the center's <strong>Forecast (T+3)</strong>.</li>
-                                <li>Adjust for <strong>Plant Overrun</strong>.</li>
-                                <li>The result is divided by that center's specific <strong>D1 Weight</strong> to get the final indent.</li>
-                            </ol>
+                        <Step icon={<Target size={24} />} title="3. Sharing out the daily requirement">
+                           <p>The Target Daily Run Rate is split across centres by what each one has <strong>actually delivered in the last 14 days</strong> — not by paper bonding quota, which understates the GATE badly.</p>
+                           <p>The yard correction is then applied: if the morning yard balance is below standard, the requirement rises by the shortfall (and falls when the yard is over-full).</p>
+                        </Step>
+
+                        <Step icon={<BarChart3 size={24} />} title="4. The Excel Model column">
+                           <p>The classical spreadsheet formula, kept for comparison and trust:</p>
+                           <p className="text-xs"><code>(requirement − pipeline) ÷ (1 + overrun) ÷ D1</code></p>
+                           <p className="text-xs">where the <strong>pipeline</strong> is cane already on its way from the last three days' orders (their D2/D3/D4 portions), and <strong>overrun</strong> is the season-wide delivered-vs-ordered ratio. This column reproduces the mill's Excel sheet exactly.</p>
+                        </Step>
+
+                        <Step icon={<TrendingUp size={24} />} title="5. The ML Recommended column">
+                            <p>Orders the way the mill actually orders — a full daily amount, not a top-up:</p>
+                            <p className="text-xs"><code>recommendation = centre requirement ÷ predicted delivery rate</code></p>
+                            <p className="text-xs">If farmers are expected to deliver 85% of what's ordered, the app recommends 118% of the need — <em>“indent more than we crush.”</em> Validated against two full seasons: ~85–90% accurate through the peak.</p>
+                        </Step>
+
+                        <Step icon={<Moon size={24} />} title="6. Season wind-down (week 14+)">
+                            <p>When fields empty out, ordering follows the mill's closure plan — something no supply model can guess.</p>
+                            <p className="text-xs">From week 14 the app <strong>follows the mill's latest placement</strong> per centre, or — better — the <strong>Late-Season Planned Indent</strong> you enter in Step 2, split across centres by recent throughput. Affected rows are flagged in the results table.</p>
                         </Step>
                     </div>
+
+                    <p className="text-xs text-slate-400 mt-4 text-center">
+                        Backtested day by day against seasons 2022-23 to 2025-26 using only the data available on each morning — no future information.
+                    </p>
                 </div>
             </div>
         </div>

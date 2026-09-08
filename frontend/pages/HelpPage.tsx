@@ -4,7 +4,6 @@ import type { SupportTicket, SupportTicketTeam } from '../types';
 import { HelpCircle, BookOpen, MessageSquare, TestTube2, TrendingUp, Target, Database, Warehouse, Send, CheckCircle, AlertTriangle } from 'lucide-react';
 import { Header } from '../components/common/Header';
 import { useAuth } from '../context/AuthContext';
-import { authService } from '../services/authService';
 
 interface HelpPageProps {
     onNavigate: (page: Page) => void;
@@ -30,7 +29,8 @@ const faqs = [
 
 const SupportTicketForm: React.FC<{ onRaiseTicket: HelpPageProps['onRaiseTicket'] }> = ({ onRaiseTicket }) => {
     const { currentUser } = useAuth();
-    const org = currentUser ? authService.getOrganizationById(currentUser.organizationId) : null;
+    // Organization lookup by id is not available on the client; show the id from the session.
+    const org = currentUser ? { name: currentUser.organizationId } : null;
     
     const [team, setTeam] = useState<SupportTicketTeam>('technical');
     const [subject, setSubject] = useState('');

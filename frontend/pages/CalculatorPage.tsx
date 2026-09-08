@@ -30,6 +30,7 @@ interface CalculatorPageProps {
     seasonalCrushingCapacity: number;
     plantCapacity: number;
     totalDailyRequirement: number;
+    plannedDailyIndent: number;
     standardStockCentre: number;
     standardStockGate: number;
     availableStockCentre: number;
@@ -48,6 +49,7 @@ interface CalculatorPageProps {
     setSeasonalCrushingCapacity: (value: number) => void;
     setPlantCapacity: (value: number) => void;
     setTotalDailyRequirement: (value: number) => void;
+    setPlannedDailyIndent: (value: number) => void;
     setStandardStockCentre: (value: number) => void;
     setStandardStockGate: (value: number) => void;
     setAvailableStockCentre: (value: number) => void;

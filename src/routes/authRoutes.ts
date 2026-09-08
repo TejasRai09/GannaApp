@@ -116,7 +116,8 @@ router.post('/impersonate', requireAuth, requireSuperadmin, async (req: AuthRequ
       orgId: target.orgId,
     };
 
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'dev-secret', {
+    // Must match the secret used everywhere else (middleware refuses to verify without env)
+    const token = jwt.sign(payload, process.env.JWT_SECRET || 'default-secret', {
       expiresIn: '8h',
     });
 

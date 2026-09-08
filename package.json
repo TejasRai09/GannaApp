@@ -6,7 +6,7 @@
     "build": "tsc -p tsconfig.json",
     "build:frontend": "cd frontend && npm run build",
     "start:prod": "npm run build && node ./dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "start": "npm run build:frontend && npm run build && node dist/server.js"
   },
   "keywords": [],

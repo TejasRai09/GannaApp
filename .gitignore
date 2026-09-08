@@ -3,3 +3,15 @@ dist/
 frontend/dist/
 .env
 *.log
+
+# Generated analysis artifacts (reports, charts, working data)
+GannaApp_*.docx
+GannaApp_*.xlsx
+backtest_results/
+run_multi_season_backtest.cmd
+
+# Replay workspace: keep scripts + transcribed yard data, exclude bulk
+_replay/season_data/
+_replay/*.png
+_replay/full_*.csv
+_replay/mlModel.js

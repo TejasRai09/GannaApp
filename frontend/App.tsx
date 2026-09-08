@@ -52,6 +52,7 @@ const AppContent: React.FC = () => {
     const [seasonalCrushingCapacity, setSeasonalCrushingCapacity] = useState<number>(18000000);
     const [plantCapacity, setPlantCapacity] = useState<number>(80);
     const [totalDailyRequirement, setTotalDailyRequirement] = useState<number>(100000);
+    const [plannedDailyIndent, setPlannedDailyIndent] = useState<number>(0); // 0 = off; late-season operator plan
     const [currentDate, setCurrentDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const [standardStockCentre, setStandardStockCentre] = useState<number>(6000);
     const [standardStockGate, setStandardStockGate] = useState<number>(9000);
@@ -326,7 +327,7 @@ const AppContent: React.FC = () => {
                 bondingData: bondingData.data, 
                 indentData: indentData.data, 
                 purchaseData: purchaseData.data,
-                plantCapacity, totalDailyRequirement,
+                plantCapacity, totalDailyRequirement, plannedDailyIndent,
                 currentDate: new Date(currentDate + 'T00:00:00.000Z'),
                 centerMapping,
                 standardStockCentre,
@@ -410,7 +411,7 @@ const AppContent: React.FC = () => {
             setIsLoading(false);
         }
     }, [
-        bondingData, indentData, purchaseData, plantCapacity, totalDailyRequirement,
+        bondingData, indentData, purchaseData, plantCapacity, totalDailyRequirement, plannedDailyIndent,
         currentDate, centerMapping, standardStockCentre, standardStockGate,
         availableStockCentre, availableStockGate, plantStartDate, seasonTotalDays, seasonalCrushingCapacity, constraints, currentUser, token
     ]);
@@ -676,7 +677,7 @@ const AppContent: React.FC = () => {
     const handleRaiseTicket = async (ticketData: Omit<SupportTicket, 'id' | 'timestamp' | 'userId' | 'userName' | 'userEmail' | 'organizationId' | 'organizationName' | 'status'>) => {
         if (!token) return;
         try {
-            await createTicket(token, ticketData.subject, ticketData.description, ticketData.category);
+            await createTicket(token, ticketData.subject, ticketData.description, ticketData.team);
             if (currentUser?.role === 'superadmin') {
                 const resp = await fetchAllTickets(token);
                 setSupportTickets((resp.tickets || []).map(mapTicket));
@@ -778,7 +779,9 @@ const AppContent: React.FC = () => {
             setBondingData={setBondingData} setIndentData={setIndentData} setPurchaseData={setPurchaseData}
             setCurrentDate={setCurrentDate} setPlantStartDate={setPlantStartDate} setSeasonTotalDays={setSeasonTotalDays}
             setSeasonalCrushingCapacity={setSeasonalCrushingCapacity} setPlantCapacity={setPlantCapacity}
-            setTotalDailyRequirement={setTotalDailyRequirement} setStandardStockCentre={setStandardStockCentre}
+            setTotalDailyRequirement={setTotalDailyRequirement}
+            plannedDailyIndent={plannedDailyIndent} setPlannedDailyIndent={setPlannedDailyIndent}
+            setStandardStockCentre={setStandardStockCentre}
             setStandardStockGate={setStandardStockGate} setAvailableStockCentre={setAvailableStockCentre}
             setAvailableStockGate={setAvailableStockGate} setIsLogicModalOpen={setIsLogicModalOpen}
             setIsSettingsModalOpen={setIsSettingsModalOpen}

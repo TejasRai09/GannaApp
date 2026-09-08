@@ -22,6 +22,8 @@ interface Step2ParametersProps {
     setPlantCapacity: (value: number) => void;
     totalDailyRequirement: number;
     setTotalDailyRequirement: (value: number) => void;
+    plannedDailyIndent: number;
+    setPlannedDailyIndent: (value: number) => void;
     standardStockCentre: number;
     setStandardStockCentre: (value: number) => void;
     standardStockGate: number;
@@ -107,7 +109,8 @@ export const Step2Parameters: React.FC<Step2ParametersProps> = (props) => {
                             <InputField label="Current Date" id="currentDate" type="date" value={props.currentDate} onChange={(e) => props.setCurrentDate(e.target.value)} readOnly={props.isReadOnly} tooltip="This is the date for which the calculation is being performed (T)." />
                             <InputField label="Plant Capacity" id="plantCapacity" type="number" value={props.plantCapacity} onChange={handleNumberChange(props.setPlantCapacity)} unit="%" min={0} max={100} readOnly={props.isReadOnly} tooltip="The target operating capacity of the plant for the day." />
                         </div>
-                        <InputField label="Target Daily Run Rate" id="totalDailyRequirement" type="number" value={props.totalDailyRequirement} onChange={handleNumberChange(props.setTotalDailyRequirement)} unit="Qtls" readOnly={props.isReadOnly} tooltip="The target amount of cane to be crushed daily, used to calculate the indent requirement." />
+                        <InputField label="Target Daily Run Rate" id="totalDailyRequirement" type="number" value={props.totalDailyRequirement} onChange={handleNumberChange(props.setTotalDailyRequirement)} unit="Qtls" readOnly={props.isReadOnly} tooltip="How much cane the plant should RECEIVE per day. Set it to what the plant truly crushes at full run — the recommendations are sized to deliver this amount (they will be higher than this number whenever farmers deliver less than ordered)." />
+                        <InputField label="Late-Season Planned Indent (optional)" id="plannedDailyIndent" type="number" value={props.plannedDailyIndent} onChange={handleNumberChange(props.setPlannedDailyIndent)} unit="Qtls" min={0} readOnly={props.isReadOnly} tooltip="Your wind-down plan: the TOTAL indent you intend to place per day as the season closes. Used from week 14 onward — the recommendation follows this level, split across centres by their recent throughput. Leave 0 and the app follows your latest placements instead." />
                         
                         <div className="pt-4 mt-4 border-t">
                             <h3 className="text-md font-semibold text-slate-800 mb-2 flex items-center gap-2"><Warehouse size={18}/> Stock Levels (Qtls)</h3>

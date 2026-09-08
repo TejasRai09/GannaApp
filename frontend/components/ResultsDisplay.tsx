@@ -51,31 +51,31 @@ export const ResultsDisplay: React.FC<{ results: CalculationResults }> = ({ resu
             {isExpanded && (
                 <div className="px-6 pb-6 pt-2 border-t border-slate-100 animate-in slide-in-from-top-2 duration-200">
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-                        <StatCard 
-                            title="Plant Overrun" 
-                            value={`${(overrunPercentage * 100).toFixed(2)}%`} 
-                            icon={<Percent className="text-orange-800"/>} 
+                        <StatCard
+                            title="Season Delivery vs Orders"
+                            value={`${(overrunPercentage * 100).toFixed(2)}%`}
+                            icon={<Percent className="text-orange-800"/>}
                             color="bg-orange-100"
-                            tooltip="A percentage that measures if the plant historically receives more or less cane than was officially indented across all centers. It's a key adjustment factor to account for systemic over/under-purchasing."
+                            tooltip="Season to date: how much cane arrived compared with everything ordered. Negative means farmers delivered less than we indented (the usual case); positive means they delivered more. Used by the Excel Model column; the ML column uses a smarter per-centre prediction instead."
                         />
-                        <StatCard 
-                            title="Effective Req (T+3)" 
-                            value={effectiveRequirement.toLocaleString()} 
-                            icon={<Target className="text-blue-800"/>} 
+                        <StatCard
+                            title="Effective Req (T+3)"
+                            value={effectiveRequirement.toLocaleString()}
+                            icon={<Target className="text-blue-800"/>}
                             color="bg-blue-100"
-                            tooltip="The adjusted daily crushing target for the plant, accounting for its operational capacity for the day."
+                            tooltip="The cane the plant should receive on the target day: your Target Daily Run Rate × plant capacity. This is the amount the recommendations are sized to deliver."
                         />
-                        <StatCard 
-                            title="Total Forecast (T+3)" 
-                            value={totalForecastT3.toLocaleString()} 
-                            icon={<BarChart3 className="text-purple-800"/>} 
+                        <StatCard
+                            title="Already On Its Way (T+3)"
+                            value={totalForecastT3.toLocaleString()}
+                            icon={<BarChart3 className="text-purple-800"/>}
                             color="bg-purple-100"
-                            tooltip="The quantity of cane expected to arrive on T+3 resulting from indents already placed in the previous three days (the 'pipeline' quantity)."
+                            tooltip="Cane expected to land on the target day from orders placed over the last three days — their late-arriving portions (D2/D3/D4). Used by the Excel Model column."
                         />
                     </div>
                     
                     <div>
-                         <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3">Full Maturity Weight Profile (D1-D4)</h3>
+                         <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3" title="Plant-wide delivery pattern: what share of an order arrives on the delivery day (D1), one day late (D2), two days late (D3), and three or more days late (D4)">How Orders Arrive — Delivery Pattern (D1–D4)</h3>
                          <div className="grid grid-cols-4 gap-2 text-center">
                              {Object.entries(dWeights).map(([key, value]) => (
                                  <div key={key} className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm">

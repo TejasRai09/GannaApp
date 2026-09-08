@@ -741,13 +741,13 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                         icon={<BarChart3 size={20} className="text-purple-600"/>} 
                         color="bg-purple-100" 
                     />
-                    <KPICard 
-                        title={selectedScope === 'all' ? "Plant Overrun" : "Center Overrun"} 
-                        value={`${(scopeMetrics.overrunPercentage > 0 ? '+' : '')}${(scopeMetrics.overrunPercentage * 100).toFixed(2)}%`} 
-                        subtext="Systemic Adjustment"
-                        tooltip="The historical percentage difference between Actual Purchases and Indented Quantities for the selected scope. Positive means farmers supply more than ordered."
-                        icon={<TrendingUp size={20} className="text-orange-600"/>} 
-                        color="bg-orange-100" 
+                    <KPICard
+                        title={selectedScope === 'all' ? "Delivery vs Orders" : "Centre Delivery vs Orders"}
+                        value={`${(scopeMetrics.overrunPercentage > 0 ? '+' : '')}${(scopeMetrics.overrunPercentage * 100).toFixed(2)}%`}
+                        subtext="Season to date"
+                        tooltip="How much cane has arrived this season compared with everything ordered. Negative = farmers delivered less than indented (the usual case); positive = they delivered more."
+                        icon={<TrendingUp size={20} className="text-orange-600"/>}
+                        color="bg-orange-100"
                     />
                 </div>
             </div>

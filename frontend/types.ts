@@ -125,6 +125,10 @@ export interface CalculationInputs {
     seasonTotalDays: number;
     seasonalCrushingCapacity: number;
     constraints: Constraint[];
+    /** Late-season operator plan: planned total daily indent (qtl). When set (>0) and the
+     *  season is in its wind-down phase (week >= 14), the ML recommendation level follows
+     *  this plan (split across centres by throughput share) instead of requirement/maturity. */
+    plannedDailyIndent?: number;
 }
 
 
@@ -162,7 +166,19 @@ export interface IndentResultRow {
     bonding: number;
     adjusted: number;
     forecastT3: number;
-    indentToRaise: number;
+    dWeightIndent: number;      // Excel-exact D-weight result (global overrun)
+    indentToRaise: number;      // final recommendation (ML-corrected when ML layer is active)
+    mlMaturity?: number;        // blended per-centre maturity used by the ML layer
+    mlPrediction?: number;      // raw linear-model maturity prediction (before blending)
+    mlAdjusted?: number;        // ML requirement (14-day throughput-share allocation)
+    mlCapped?: boolean;         // late-season guard capped this indent at 2x recent arrivals
+    bandLow?: number;
+    bandMid?: number;
+    bandHigh?: number;
+    bandStatus?: 'within' | 'above' | 'below';
+    phase?: string;
+    weekOfSeason?: number;
+    correctionApplied?: boolean; // true if Layer 2 or 3 changed the number
 }
 
 export interface ClosedIndentAnalysis {
@@ -283,6 +299,12 @@ export interface CalculationResults {
     
     // Phase 3: Risk Analysis
     riskAnalysis?: RiskAnalysisItem[];
+
+    // Overall band (Layer 3)
+    overallBandLo?: number;
+    overallBandMid?: number;
+    overallBandHigh?: number;
+    overallAdjustmentFactor?: number; // >1 means Layer 3 scaled up, 1 means no change
 }
 
 export interface CalculationRun {

@@ -21,6 +21,8 @@ import type {
     RiskAnalysisItem
 } from '../types';
 import { parseDate, addDays, isSameDay, formatDateGB } from './dateUtils';
+import { getBandResult, getOverallBand, getWeekOfSeason, getPhase, type BandPhase } from './bandService';
+import { blendedMaturity } from './mlMaturityService';
 
 
 /**
@@ -125,6 +127,10 @@ interface MaturityWeightsResult {
     maturityAnalysisPurchases: NormalizedPurchase[];
     fullSeasonAnalysis: ClosedIndentAnalysis[]; // For New Full Maturity Tab
     seasonDWeights: CenterDWeights[]; // For New Full Maturity Tab
+    // ML layer lag features (all from CLOSED data only — no leakage)
+    mlLagCentreRecent: Map<string, number>; // centre maturity over closed deliveries T-7..T-4
+    mlLagCentreLong: Map<string, number>;   // centre maturity over deliveries T-18..T-4
+    mlLagPlantRecent: number | null;        // plant-wide maturity over closed deliveries T-7..T-4
 }
 
 /**
@@ -280,7 +286,45 @@ const deriveMaturityWeights = (
         d4: closedIndentAnalysis.reduce((s,a) => s+a.d4Purchases, 0) / closedIndentAnalysis.reduce((s,a) => s+a.indentQty, 1),
     };
     
-    return { centerWeights, globalWeights, closedIndentAnalysis, centerDWeights, maturityAnalysisPurchases: purchases, fullSeasonAnalysis, seasonDWeights };
+    // ── ML layer lag features (closed data only, matching how the model was trained) ──
+    // Recent: total maturity (all linked purchases / indent qty) over the T-7..T-4 closed set.
+    const mlLagCentreRecent = new Map<string, number>();
+    let mlLagPlantRecent: number | null = null;
+    {
+        const agg = new Map<string, { p: number; q: number }>();
+        let plantP = 0, plantQ = 0;
+        for (const a of closedIndentAnalysis) {
+            const e = agg.get(a.centreId) || { p: 0, q: 0 };
+            e.p += a.totalPurchases; e.q += a.indentQty;
+            agg.set(a.centreId, e);
+            plantP += a.totalPurchases; plantQ += a.indentQty;
+        }
+        for (const [id, e] of agg) {
+            if (e.q > 0) mlLagCentreRecent.set(id, e.p / e.q);
+        }
+        if (plantQ > 0) mlLagPlantRecent = plantP / plantQ;
+    }
+
+    // Long: same ratio over deliveries T-18..T-4 (a longer trend window, still fully closed).
+    const t_minus_18 = addDays(currentDate, -18);
+    const longClosedIndents = closedIndents.filter(indent => indent.raisedFor >= t_minus_18);
+    const longAnalysis = longClosedIndents.map(indent =>
+        analyzeIndentMaturity(indent, purchasesByIndent.get(`${indent.centreId}-${indent.raisedFor.toISOString()}`) || [], bondingMap));
+    const mlLagCentreLong = new Map<string, number>();
+    {
+        const agg = new Map<string, { p: number; q: number }>();
+        for (const a of longAnalysis) {
+            const e = agg.get(a.centreId) || { p: 0, q: 0 };
+            e.p += a.totalPurchases; e.q += a.indentQty;
+            agg.set(a.centreId, e);
+        }
+        for (const [id, e] of agg) {
+            if (e.q > 0) mlLagCentreLong.set(id, e.p / e.q);
+        }
+    }
+
+    return { centerWeights, globalWeights, closedIndentAnalysis, centerDWeights, maturityAnalysisPurchases: purchases, fullSeasonAnalysis, seasonDWeights,
+             mlLagCentreRecent, mlLagCentreLong, mlLagPlantRecent };
 };
 
 
@@ -419,7 +463,7 @@ const calculateOpenIndentMatrix = (
 };
 
 export const calculateRecommendedIndents = (inputs: CalculationInputs): CalculationResults => {
-    const { bondingData, indentData, purchaseData, plantCapacity, totalDailyRequirement, currentDate, centerMapping, standardStockCentre, standardStockGate, availableStockCentre, availableStockGate, plantStartDate: plantStartDateStr, constraints } = inputs;
+    const { bondingData, indentData, purchaseData, plantCapacity, totalDailyRequirement, currentDate, centerMapping, standardStockCentre, standardStockGate, availableStockCentre, availableStockGate, plantStartDate: plantStartDateStr, constraints, plannedDailyIndent } = inputs;
 
     const plantStartDate = parseDate(plantStartDateStr) || new Date();
     
@@ -427,7 +471,8 @@ export const calculateRecommendedIndents = (inputs: CalculationInputs): Calculat
     const nIndents = normalizeIndents(indentData, centerMapping);
     const nPurchases = normalizePurchases(purchaseData, centerMapping);
 
-    const { centerWeights, globalWeights, closedIndentAnalysis, centerDWeights, maturityAnalysisPurchases, fullSeasonAnalysis, seasonDWeights } = deriveMaturityWeights(nIndents, nPurchases, nBonding, currentDate, plantStartDate);
+    const { centerWeights, globalWeights, closedIndentAnalysis, centerDWeights, maturityAnalysisPurchases, fullSeasonAnalysis, seasonDWeights,
+            mlLagCentreRecent, mlLagCentreLong, mlLagPlantRecent } = deriveMaturityWeights(nIndents, nPurchases, nBonding, currentDate, plantStartDate);
     
     const { forecastBreakdown, totalForecastT3 } = calculateForecasts(nIndents, centerWeights, currentDate, nBonding);
 
@@ -478,13 +523,12 @@ export const calculateRecommendedIndents = (inputs: CalculationInputs): Calculat
 
     // ---------------------------------------------
 
-    // Overrun = total season purchases / closed indent qty - 1
-    // Denominator: only "closed" indents (raisedFor <= T-4, fully received with all D-purchases)
-    // Numerator: ALL purchases in the season (matching Excel formula)
-    const t_minus_4_overrun = addDays(currentDate, -4);
-    const totalIndentQty = nIndents
-        .filter(i => i.raisedFor >= plantStartDate && i.raisedFor <= t_minus_4_overrun)
-        .reduce((sum, i) => sum + i.qty, 0);
+    // Overrun = total purchases / total indents - 1   (matches Excel: Summary!I20/Summary!H20 - 1)
+    // Excel uses B65 = SUM(Purchase!F:F) / SUM(Indent!E:E) - 1:
+    //   Numerator   = ALL purchases in the data (no date filter)
+    //   Denominator = ALL indents in the data (no date filter) — NOT just closed indents.
+    // Filtering the denominator to "closed" indents (<= T-4) wrongly inflates the overrun.
+    const totalIndentQty = nIndents.reduce((sum, i) => sum + i.qty, 0);
     const totalPurchaseQty = nPurchases.reduce((sum, p) => sum + p.qty, 0);
     const overrunPercentage = totalIndentQty > 0 ? (totalPurchaseQty / totalIndentQty) - 1 : 0;
 
@@ -520,14 +564,166 @@ export const calculateRecommendedIndents = (inputs: CalculationInputs): Calculat
         };
     });
 
-    const tableData: IndentResultRow[] = indentCalculationBreakdown.map(row => ({
-        centreId: row.centreId,
-        centreName: row.centreName,
-        bonding: row.bonding,
-        adjusted: row.adjustedRequirement,
-        forecastT3: row.forecastT3,
-        indentToRaise: row.finalIndent,
-    }));
+    // ── Excel-EXACT column (computed on UNMAPPED centres) ────────────────────
+    // The real Excel workbook treats every centre separately — its "mapping" sheet is
+    // only a D-weight fallback, never data aggregation. Because Excel clamps each
+    // centre's gap at zero BEFORE summing, computing on merged (mapped) data gives a
+    // different number than Excel. So the Excel column is computed here on raw,
+    // unmapped centres and cluster rows display the SUM of Excel's per-centre values.
+    // Excel's stock split is also mirrored exactly: the gate stock difference goes
+    // wholly to centre code 1 (Bonding!G2); ALL other rows — including named sub-gates
+    // like "GATE (AIRA)" — share the centre stock difference (Bonding!G3+).
+    const EMPTY_MAPPING: { [key: string]: string } = {};
+    const nBondingRaw = normalizeBonding(bondingData, EMPTY_MAPPING);
+    const nIndentsRaw = normalizeIndents(indentData, EMPTY_MAPPING);
+    const nPurchasesRaw = normalizePurchases(purchaseData, EMPTY_MAPPING);
+    const rawWeights = deriveMaturityWeights(nIndentsRaw, nPurchasesRaw, nBondingRaw, currentDate, plantStartDate).centerWeights;
+    const rawForecasts = calculateForecasts(nIndentsRaw, rawWeights, currentDate, nBondingRaw).forecastBreakdown;
+    const totalBondingRaw = nBondingRaw.reduce((s, b) => s + b.qty, 0);
+    const totalBondingCentreRaw = nBondingRaw.filter(b => b.centreId !== '1').reduce((s, b) => s + b.qty, 0);
+    const excelByDisplay = new Map<string, number>();
+    for (const c of nBondingRaw) {
+        const reqB = totalBondingRaw > 0 ? effectiveRequirement * (c.qty / totalBondingRaw) : 0;
+        const stockAdj = c.centreId === '1'
+            ? stockDiffGate
+            : (totalBondingCentreRaw > 0 ? stockDiffCentre * (c.qty / totalBondingCentreRaw) : 0);
+        const forecast = rawForecasts.find(f => f.centreId === c.centreId)?.totalForecast || 0;
+        const net = Math.max(0, reqB + stockAdj - forecast);
+        const d1 = rawWeights.get(c.centreId)?.d1 || 0;
+        const excelIndent = d1 > 0 ? net / (1 + overrunPercentage) / d1 : 0;
+        const displayId = centerMapping[c.centreId] || c.centreId;
+        excelByDisplay.set(displayId, (excelByDisplay.get(displayId) || 0) + excelIndent);
+    }
+
+    // ── ML layer ─────────────────────────────────────────────────────────────
+    // dWeightIndent  = Excel-exact value from the block above.
+    // indentToRaise  = ML-corrected recommendation, differing in two backtested ways:
+    //   1. Requirement allocated by each centre's ACTUAL 14-day throughput share
+    //      (bonding share under-allocates GATE by ~40%; backtest: centre-wise error
+    //      58.5% → 23.7%, GATE −46% → −1%). Falls back to bonding share for centres
+    //      with no recent throughput.
+    //   2. Global (1 + overrun) replaced by per-centre ML-predicted maturity
+    //      (backtest: maturity error 0.164 → 0.101, better at 106/111 centres).
+    //          mlIndent = max(0, mlRequirement − forecast) / mlMaturity / D1
+    // Seasonal bands are fetched for DISPLAY only.
+    const weekOfSeason = getWeekOfSeason(currentDate, plantStartDate);
+    const { phase } = getPhase(weekOfSeason);
+    const isGateMap = new Map(nBonding.map(b => [b.centreId, b.isGate]));
+
+    // ML requirement allocation: last-14-day actual throughput share
+    const TP_WINDOW_DAYS = 14;
+    const tpLo = addDays(currentDate, -TP_WINDOW_DAYS).getTime();
+    const tpHi = addDays(currentDate, -1).getTime();
+    // From week 14 the season is in wind-down: recommendations switch to "follow mode"
+    // (see the late-season block below).
+    const LATE_SEASON_WEEK = 14;
+    const tpByCentre = new Map<string, number>();
+    let tpTotal = 0;
+    for (const p of nPurchases) {
+        const t = p.purchaseDate.getTime();
+        if (t >= tpLo && t <= tpHi && p.centreId) {
+            tpByCentre.set(p.centreId, (tpByCentre.get(p.centreId) || 0) + p.qty);
+            tpTotal += p.qty;
+        }
+    }
+    // Latest KNOWN placement: the most recent open-indent day (T+2, else T+1, else T+0) —
+    // those orders were placed at least a day ago, so they are known this morning.
+    const latestKnownIndent = new Map<string, number>();
+    let latestKnownTotal = 0;
+    for (const dd of [2, 1, 0]) {
+        const target = addDays(currentDate, dd);
+        for (const i of nIndents) {
+            if (isSameDay(i.raisedFor, target)) {
+                latestKnownIndent.set(i.centreId, (latestKnownIndent.get(i.centreId) || 0) + i.qty);
+                latestKnownTotal += i.qty;
+            }
+        }
+        if (latestKnownTotal > 0) break;
+    }
+    const mlShare = new Map<string, number>();
+    {
+        const raw = new Map<string, number>();
+        for (const b of nBonding) {
+            const tp = tpByCentre.get(b.centreId);
+            raw.set(b.centreId, (tp && tpTotal > 0) ? tp / tpTotal : (totalBonding > 0 ? b.qty / totalBonding : 0));
+        }
+        const sum = Array.from(raw.values()).reduce((s, v) => s + v, 0);
+        for (const [k, v] of raw) mlShare.set(k, sum > 0 ? v / sum : 0);
+    }
+
+    const tableData: IndentResultRow[] = indentCalculationBreakdown.map(row => {
+        // Excel-exact value: computed per RAW centre (no mapping) and summed for cluster
+        // rows — matches what the Excel sheet actually shows for these centres.
+        const dWeightIndent = excelByDisplay.get(row.centreId) ?? row.finalIndent;
+
+        // ML layer: per-centre expected maturity for the T+3 delivery
+        const { maturity: mlMaturity, mlPrediction } = blendedMaturity({
+            deliveryDate: t_plus_3,
+            plantStartDate,
+            isGate: isGateMap.get(row.centreId) || false,
+            bonding: row.bonding,
+            lagCentreRecent: mlLagCentreRecent.get(row.centreId) ?? null,
+            lagCentreLong: mlLagCentreLong.get(row.centreId) ?? null,
+            lagPlantRecent: mlLagPlantRecent,
+        });
+        // ML recommendation: GROSS steady-state policy (matches how the mill orders).
+        // Order = centre's requirement / predicted delivery-rate, every day. If farmers
+        // deliver 85% of orders, order 1/0.85 = 118% of the need — "indent more than we
+        // crush". No pipeline subtraction: the daily gross order IS the policy.
+        // Backtest (4 seasons, LOSO): peak-season daily error 8-16% (Excel 16-108%),
+        // centre-wise error 17% overall vs Excel 56.5%, GATE within ±10%.
+        const mlRequirement = effectiveRequirement * (mlShare.get(row.centreId) ?? 0) + row.stockAdjustment;
+        let mlIndent = mlRequirement > 0 ? mlRequirement / mlMaturity : 0;
+
+        // Late-season WIND-DOWN mode (week >= 14): the mill's ordering is driven by its
+        // closure plan, which no supply-data model can infer. The best known signal is the
+        // mill's own latest placement — the indent placed yesterday for delivery T+2.
+        //  - level  = operator plan (plannedDailyIndent) if entered, else the latest known
+        //             day's total placement
+        //  - split  = the latest known day's per-centre split (fallback: throughput share)
+        // Backtest (3 seasons): late-season volume-weighted error roughly HALVES for both
+        // the centre group and GATE vs the 2x-arrivals cap (e.g. 24-25: 56%→27%, 61%→31%).
+        let mlCapped = false;
+        if (weekOfSeason >= LATE_SEASON_WEEK) {
+            const latestQty = latestKnownIndent.get(row.centreId) || 0;
+            if (plannedDailyIndent && plannedDailyIndent > 0) {
+                const share = latestKnownTotal > 0 ? latestQty / latestKnownTotal : (mlShare.get(row.centreId) ?? 0);
+                mlIndent = plannedDailyIndent * share;
+            } else {
+                mlIndent = latestQty; // follow the mill's own latest placement
+                mlCapped = mlIndent < mlRequirement / mlMaturity; // flag: wind-down held it below model level
+            }
+        }
+
+        const band = getBandResult(row.centreName, mlIndent, currentDate, plantStartDate);
+        const bandStatus = band
+            ? (mlIndent < band.lo ? 'below' : mlIndent > band.hi ? 'above' : 'within') as 'within' | 'above' | 'below'
+            : undefined;
+
+        return {
+            centreId: row.centreId,
+            centreName: row.centreName,
+            bonding: row.bonding,
+            adjusted: row.adjustedRequirement,
+            forecastT3: row.forecastT3,
+            dWeightIndent,                  // Excel-exact value (shown alongside)
+            indentToRaise: mlIndent,        // ML-corrected recommendation
+            mlMaturity,
+            mlPrediction,
+            mlAdjusted: mlRequirement,      // throughput-allocated requirement used by the ML path
+            mlCapped,                       // true if the late-season cap limited this indent
+            bandLow: band?.lo,
+            bandMid: band?.mid,
+            bandHigh: band?.hi,
+            bandStatus,
+            phase: band?.phase,
+            weekOfSeason: band?.weekOfSeason,
+            correctionApplied: false,
+        };
+    });
+
+    const overallBand = getOverallBand(weekOfSeason, phase as BandPhase);
+    const overallAdjustmentFactor = 1.0; // no scaling — matches Excel
     
     const { matrix, headers } = calculateOpenIndentMatrix(nIndents, nPurchases, centerWeights, nBonding, currentDate, tableData);
 
@@ -546,6 +742,10 @@ export const calculateRecommendedIndents = (inputs: CalculationInputs): Calculat
         indentCalculationBreakdown,
         fullSeasonAnalysis,
         seasonDWeights,
-        riskAnalysis
+        riskAnalysis,
+        overallBandLo: overallBand?.lo,
+        overallBandMid: overallBand?.mid,
+        overallBandHigh: overallBand?.hi,
+        overallAdjustmentFactor,
     };
 };

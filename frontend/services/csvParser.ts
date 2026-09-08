@@ -8,7 +8,9 @@ export const parseCsv = <T,>(csvText: string): T[] => {
     const headerLine = lines.shift();
     if (!headerLine) return [];
 
-    const headers = headerLine.split(',').map(h => h.trim());
+    // Strip UTF-8 BOM (﻿) that Excel adds to CSV exports
+    const cleanHeader = headerLine.replace(/^﻿/, '');
+    const headers = cleanHeader.split(',').map(h => h.trim());
     
     return lines.map(line => {
         // This is a simple parser. For robust CSV parsing, a library would be better,
