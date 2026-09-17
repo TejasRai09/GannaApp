@@ -21,3 +21,5 @@ _replay/mlModel.js
 *.ppk
 id_rsa
 id_ed25519
+GANNA_*.docx
+GANNA_*.xlsx
