@@ -6,6 +6,7 @@ import { SignupPage } from './pages/SignupPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { CalculatorPage } from './pages/CalculatorPage';
 import { HistoryPage } from './pages/HistoryPage';
+import { VariancePage } from './pages/VariancePage';
 import { HelpPage } from './pages/HelpPage';
 import { SuperadminPage } from './pages/SuperadminPage';
 import { TeamManagementPage } from './pages/TeamManagementPage';
@@ -23,7 +24,7 @@ import type { Bonding, Indent, Purchase, CalculationRun, StoredData, User, Suppo
 import { generateId } from './utils/utils';
 import { isSameDay, parseDate } from './services/dateUtils';
 
-export type Page = 'home' | 'login' | 'signup' | 'dashboard' | 'calculator' | 'history' | 'help' | 'superadmin' | 'team' | 'pricing' | 'branding';
+export type Page = 'home' | 'login' | 'signup' | 'dashboard' | 'calculator' | 'history' | 'help' | 'superadmin' | 'team' | 'pricing' | 'branding' | 'variance';
 export type DataType = 'bonding' | 'indent' | 'purchase';
 export type HomePageTheme = 'ganna' | 'millniti' | 'indentsahayak';
 
@@ -762,6 +763,7 @@ const AppContent: React.FC = () => {
         return <HistoryPage history={calculationHistory} onNavigate={navigate} onView={handleViewHistoryItem}
             onDelete={handleDeleteHistoryItem} onLogout={handleLogout} />;
     }
+    if (page === 'variance') return <VariancePage onNavigate={navigate} onLogout={handleLogout} />;
     if (page === 'help') return <HelpPage onNavigate={navigate} onLogout={handleLogout} onRaiseTicket={handleRaiseTicket} />;
 
     return (

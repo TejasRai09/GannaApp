@@ -174,7 +174,11 @@ export const Step4Results: React.FC<Step4ResultsProps> = ({ activeCalculation, o
                     {activeTab === 'summary' && (
                         <div className="space-y-8">
                             <ResultsDisplay results={calculationResults} />
-                            <IndentTable results={calculationResults} calculationName={activeCalculation.name} />
+                            <IndentTable
+                                results={calculationResults}
+                                calculationName={activeCalculation.name}
+                                currentDate={parseDate(activeCalculation.inputs.currentDate) ?? undefined}
+                            />
                         </div>
                     )}
                     {activeTab === 'indent_calc' && <IndentCalculationBreakdown results={calculationResults} />}

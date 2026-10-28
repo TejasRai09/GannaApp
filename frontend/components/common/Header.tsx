@@ -1,5 +1,5 @@
 import React from 'react';
-import { LogOut, HelpCircle, LayoutGrid, Users, Settings, Info, UserX, Building2 } from 'lucide-react';
+import { LogOut, HelpCircle, LayoutGrid, Users, Settings, Info, UserX, Building2, BarChart3 } from 'lucide-react';
 import type { Page } from '../../App';
 import { useAuth } from '../../context/AuthContext';
 
@@ -81,6 +81,7 @@ export const Header: React.FC<HeaderProps> = ({ pageTitle, onNavigate, onLogout,
                         </>
                     )}
                     {showLogic && <button onClick={onOpenLogic} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors" aria-label="Show calculation logic"><Info size={20} /></button>}
+                    {!isSuperAdmin && <button onClick={() => onNavigate('variance')} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors" aria-label="Variance & Scorecard"><BarChart3 size={20} /></button>}
                     {!isSuperAdmin && <button onClick={() => onNavigate('help')} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors" aria-label="Help & Glossary"><HelpCircle size={20} /></button>}
                     {showSettings && <button onClick={onOpenSettings} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors" aria-label="Open settings"><Settings size={20} /></button>}
                     <button onClick={onLogout} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors" aria-label="Logout"><LogOut size={20} /></button>

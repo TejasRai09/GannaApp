@@ -163,6 +163,7 @@ export interface DWeights {
 export interface IndentResultRow {
     centreId: string;
     centreName: string;
+    isGate?: boolean;           // gate vs purchase centre — used by the v2 feedback ledger
     bonding: number;
     adjusted: number;
     forecastT3: number;

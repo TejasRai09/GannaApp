@@ -703,6 +703,7 @@ export const calculateRecommendedIndents = (inputs: CalculationInputs): Calculat
         return {
             centreId: row.centreId,
             centreName: row.centreName,
+            isGate: isGateMap.get(row.centreId) || false,
             bonding: row.bonding,
             adjusted: row.adjustedRequirement,
             forecastT3: row.forecastT3,
