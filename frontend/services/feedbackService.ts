@@ -136,6 +136,103 @@ export const saveOutcomes = (
     body: JSON.stringify({ deliveryDate: toIsoDate(deliveryDate), rows, source }),
   });
 
+/**
+ * Backfill outcomes (3) and (4) from the uploaded files, so the plant team
+ * never has to type them in.
+ *
+ *   actual_indent  = indent rows whose Indent Date is that delivery day
+ *   actual_arrival = purchase rows linked back to that same Indent Date
+ *
+ * The purchase file carries the Indent Date it fulfils, which is what makes
+ * the arrival attributable to the order that caused it. Arrivals keep landing
+ * for about three days after the delivery date, so recent days are swept
+ * repeatedly and simply firm up as the late deliveries come in.
+ */
+export const syncOutcomes = async (
+  token: string,
+  indentRows: any[],
+  purchaseRows: any[],
+  dates: Date[],
+  centerMapping: { [k: string]: string } = {},
+): Promise<{ days: number; rowsWritten: number }> => {
+  const pick = (row: any, keys: string[]): string => {
+    for (const k of keys) {
+      for (const actual of Object.keys(row)) {
+        if (actual.trim().toLowerCase() === k.toLowerCase()) {
+          const v = row[actual];
+          if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+        }
+      }
+    }
+    return '';
+  };
+  const qty = (row: any) => Number(pick(row, ['Qty in Qtls', 'Qty'])) || 0;
+  const mapped = (code: string) => centerMapping[code] || code;
+
+  // Bucket both files by delivery date once, rather than re-scanning per day.
+  const byDate = (rows: any[], dateKeys: string[]) => {
+    const out = new Map<string, Map<string, number>>();
+    for (const r of rows) {
+      const raw = pick(r, dateKeys);
+      if (!raw) continue;
+      const d = parseLooseDate(raw);
+      if (!d) continue;
+      const key = toIsoDate(d);
+      const centre = mapped(pick(r, ['Code', 'c_Code']));
+      if (!centre) continue;
+      if (!out.has(key)) out.set(key, new Map());
+      const m = out.get(key)!;
+      m.set(centre, (m.get(centre) || 0) + qty(r));
+    }
+    return out;
+  };
+
+  const indentByDate = byDate(indentRows, ['Indent Date']);
+  const arrivalByDate = byDate(purchaseRows, ['Indent Date']);
+
+  let days = 0, rowsWritten = 0;
+  for (const d of dates) {
+    const key = toIsoDate(d);
+    const ind = indentByDate.get(key);
+    const arr = arrivalByDate.get(key);
+    if (!ind && !arr) continue;
+
+    const centres = new Set<string>([...(ind?.keys() ?? []), ...(arr?.keys() ?? [])]);
+    const rows = Array.from(centres).map((centreId) => ({
+      centreId,
+      actualIndent: ind?.get(centreId) ?? null,
+      actualArrival: arr?.get(centreId) ?? null,
+    }));
+    if (rows.length === 0) continue;
+
+    try {
+      const r = await saveOutcomes(token, d, rows, 'import');
+      rowsWritten += r.updated;
+      days++;
+    } catch {
+      // A day with no prediction rows yet simply has nothing to attach to.
+      // That is normal when backfilling, so it must not abort the sweep.
+    }
+  }
+  return { days, rowsWritten };
+};
+
+/** Handles the dd-mm-yyyy / dd-MMM-yyyy / ISO forms the uploaded files use. */
+const parseLooseDate = (s: string): Date | null => {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+
+  const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  const m = /^(\d{1,2})[-/\s]([A-Za-z]{3,}|\d{1,2})[-/\s](\d{2,4})/.exec(s);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const mon = /^\d+$/.test(m[2]) ? Number(m[2]) - 1 : MONTHS.indexOf(m[2].slice(0, 3).toLowerCase());
+  let year = Number(m[3]);
+  if (year < 100) year += 2000;
+  if (mon < 0 || mon > 11 || !day) return null;
+  return new Date(year, mon, day);
+};
+
 export const getLedger = (token: string, from: Date, to: Date, centreId = 'all') =>
   apiFetch<{ ok: boolean; rows: LedgerRow[] }>(
     `/api/feedback/ledger?from=${toIsoDate(from)}&to=${toIsoDate(to)}&centreId=${encodeURIComponent(centreId)}`,

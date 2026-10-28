@@ -13,6 +13,7 @@ import { TeamManagementPage } from './pages/TeamManagementPage';
 import { BrandingPage } from './pages/BrandingPage';
 import { PricingPage } from './pages/PricingPage';
 // FIX: Update import for CalculationInputs
+import { syncOutcomes } from './services/feedbackService';
 import { calculateRecommendedIndents } from './services/calculationService';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider, useToast } from './context/ToastContext';
@@ -22,7 +23,7 @@ import { createTicket, fetchAllTickets, fetchMyOrgTickets, updateTicketStatus } 
 // FIX: Update import for CalculationInputs
 import type { Bonding, Indent, Purchase, CalculationRun, StoredData, User, SupportTicket, SupportTicketStatus, CalculationInputs, Constraint, YardBalanceRow } from './types';
 import { generateId } from './utils/utils';
-import { isSameDay, parseDate } from './services/dateUtils';
+import { isSameDay, parseDate, addDays } from './services/dateUtils';
 
 export type Page = 'home' | 'login' | 'signup' | 'dashboard' | 'calculator' | 'history' | 'help' | 'superadmin' | 'team' | 'pricing' | 'branding' | 'variance';
 export type DataType = 'bonding' | 'indent' | 'purchase';
@@ -403,6 +404,28 @@ const AppContent: React.FC = () => {
                     }
                 } catch (e) {
                     console.warn('Failed to persist calculation to backend', e);
+                }
+
+                // v2 feedback loop: fill in what was actually indented and what
+                // actually arrived, from the files already uploaded, so the plant
+                // team never types an outcome by hand. Arrivals keep landing for
+                // about three days, so a trailing window is re-swept each run and
+                // the recent days firm up as late deliveries come in.
+                try {
+                    const sweep: Date[] = [];
+                    for (let back = 1; back <= 21; back++) {
+                        sweep.push(addDays(inputs.currentDate, 3 - back));
+                    }
+                    await syncOutcomes(
+                        token,
+                        indentData.data,
+                        purchaseData.data,
+                        sweep,
+                        inputs.centerMapping,
+                    );
+                } catch (e) {
+                    // Never let outcome backfill break the calculation itself.
+                    console.warn('Outcome sync skipped', e);
                 }
             }
 
