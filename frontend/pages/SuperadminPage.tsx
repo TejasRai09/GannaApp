@@ -192,7 +192,7 @@ export const SuperadminPage: React.FC<SuperadminPageProps> = (props) => {
                                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-50 p-4 rounded-lg border">
                                         <div className="flex items-center gap-2">
                                             <div className="flex gap-2">
-                                                <button onClick={() => setSelectedTheme('ganna')} className={`px-3 py-1.5 rounded-md font-semibold text-sm ${selectedTheme === 'ganna' ? 'bg-blue-600 text-white shadow' : 'bg-slate-200 hover:bg-slate-300'}`}>GANNA</button>
+                                                <button onClick={() => setSelectedTheme('ganna')} className={`px-3 py-1.5 rounded-md font-semibold text-sm ${selectedTheme === 'ganna' ? 'bg-blue-600 text-white shadow' : 'bg-slate-200 hover:bg-slate-300'}`}>GANNA INDENT</button>
                                                 <button onClick={() => setSelectedTheme('millniti')} className={`px-3 py-1.5 rounded-md font-semibold text-sm ${selectedTheme === 'millniti' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-200 hover:bg-slate-300'}`}>MillNiti</button>
                                                 <button onClick={() => setSelectedTheme('indentsahayak')} className={`px-3 py-1.5 rounded-md font-semibold text-sm ${selectedTheme === 'indentsahayak' ? 'bg-green-600 text-white shadow' : 'bg-slate-200 hover:bg-slate-300'}`}>IndentSahayak</button>
                                             </div>

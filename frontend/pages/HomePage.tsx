@@ -9,7 +9,7 @@ interface HomePageProps {
 
 const themeConfig = {
     ganna: {
-        title: "GANNA",
+        title: "GANNA INDENT",
         tagline: "Ganna Allocation & Normalized Needs Analyzer",
         description: "Transform raw bonding, indent, and purchase data into precise, actionable daily recommendations with our intelligent calculation engine.",
         ctaText: "Get Started Now",

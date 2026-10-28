@@ -57,7 +57,7 @@ export const Header: React.FC<HeaderProps> = ({ pageTitle, onNavigate, onLogout,
                         className="text-3xl font-extrabold text-[#003580] leading-tight tracking-tighter"
                         title="Ganna Allocation & Normalized Needs Analyzer"
                     >
-                        GANNA
+                        GANNA INDENT
                     </h1>
                     <p className="text-sm font-medium text-slate-500">{pageTitle}</p>
                 </div>

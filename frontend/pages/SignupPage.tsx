@@ -38,7 +38,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigate }) => {
             </header>
             <div className="w-full max-w-md">
                 <div className="bg-white p-8 rounded-xl shadow-lg text-center">
-                    <h1 className="text-3xl font-extrabold text-[#003580] leading-tight tracking-tighter">GANNA</h1>
+                    <h1 className="text-3xl font-extrabold text-[#003580] leading-tight tracking-tighter">GANNA INDENT</h1>
                     <p className="text-sm font-medium text-slate-500 mb-6">Sugarcane Indent Planning Engine</p>
                     <h2 className="text-2xl font-bold text-slate-800 mb-4">Create an Account</h2>
                     
@@ -106,7 +106,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigate }) => {
                         &copy; {new Date().getFullYear()} Zuari Industries. All Rights Reserved.
                     </div>
                     <div className="font-semibold text-slate-800 md:flex-1 text-center md:text-right">
-                        <div>GANNA - Sugarcane Indent Planning Engine</div>
+                        <div>GANNA INDENT - Sugarcane Indent Planning Engine</div>
                         <div className="text-xs text-slate-500 font-normal mt-1">(Ganna Allocation & Normalized Needs Analyzer)</div>
                     </div>
                 </div>
