@@ -14,6 +14,8 @@ import orgDataRoutes from './routes/orgDataRoutes';
 import supportRoutes from './routes/supportRoutes';
 import orgRoutes from './routes/orgRoutes';
 import feedbackRoutes from './routes/feedbackRoutes';
+import settingsRoutes from './routes/settingsRoutes';
+import auditRoutes from './routes/auditRoutes';
 
 dotenv.config();
 
@@ -64,6 +66,8 @@ app.use('/api/org-data', orgDataRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/orgs', orgRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/audit', auditRoutes);
 
 const frontendDist = path.join(__dirname, '../frontend/dist');
 app.use(express.static(frontendDist));

@@ -2,6 +2,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
+import { AuditPage } from './pages/AuditPage';
+import { AccessDenied } from './components/common/AccessDenied';
+import { getSettings, saveSettings, isUsableSeasonStart } from './services/settingsService';
+import { can } from './services/permissions';
 import { SignupPage } from './pages/SignupPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { CalculatorPage } from './pages/CalculatorPage';
@@ -25,7 +29,7 @@ import type { Bonding, Indent, Purchase, CalculationRun, StoredData, User, Suppo
 import { generateId } from './utils/utils';
 import { isSameDay, parseDate, addDays } from './services/dateUtils';
 
-export type Page = 'home' | 'login' | 'signup' | 'dashboard' | 'calculator' | 'history' | 'help' | 'superadmin' | 'team' | 'pricing' | 'branding' | 'variance';
+export type Page = 'home' | 'login' | 'signup' | 'dashboard' | 'calculator' | 'history' | 'help' | 'superadmin' | 'team' | 'pricing' | 'branding' | 'variance' | 'audit';
 export type DataType = 'bonding' | 'indent' | 'purchase';
 export type HomePageTheme = 'ganna' | 'millniti' | 'indentsahayak';
 
@@ -49,7 +53,12 @@ const AppContent: React.FC = () => {
     const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
     
     // Calculation parameters
+    // Loaded from the server, not defaulted here. An empty season start parses
+    // to the epoch, which puts every calculation into late-season wind-down mode
+    // and returns zero for every centre, so the app refuses to calculate until
+    // this holds a real date rather than guessing one.
     const [plantStartDate, setPlantStartDate] = useState<string>('');
+    const [settingsLoaded, setSettingsLoaded] = useState<boolean>(false);
     const [seasonTotalDays, setSeasonTotalDays] = useState<number>(180);
     const [seasonalCrushingCapacity, setSeasonalCrushingCapacity] = useState<number>(18000000);
     const [plantCapacity, setPlantCapacity] = useState<number>(80);
@@ -203,6 +212,33 @@ const AppContent: React.FC = () => {
         }
     }, [currentUser, loadOrgData]);
 
+    // Season settings live on the server so they are set once and shared by the
+    // whole organisation. They used to be React state initialised to '', which
+    // reset on every reload and silently zeroed every calculation.
+    useEffect(() => {
+        if (!token || !currentUser || currentUser.role === 'superadmin') return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const { settings } = await getSettings(token);
+                if (cancelled) return;
+                if (isUsableSeasonStart(settings.seasonStartDate)) {
+                    setPlantStartDate(settings.seasonStartDate!);
+                }
+                if (settings.seasonTotalDays) setSeasonTotalDays(settings.seasonTotalDays);
+                if (settings.seasonalCrushingCapacity) {
+                    setSeasonalCrushingCapacity(settings.seasonalCrushingCapacity);
+                }
+            } catch {
+                // A settings failure must not block the rest of the app; the
+                // calculate guard below still prevents a bad run.
+            } finally {
+                if (!cancelled) setSettingsLoaded(true);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [token, currentUser]);
+
     // Auto-populate available stock from the most recent yard balance entry on or before currentDate
     useEffect(() => {
         if (!yardBalanceData?.data?.length || !currentDate) return;
@@ -299,8 +335,29 @@ const AppContent: React.FC = () => {
         setPlantStartDate(newAssumptions.startDate);
         setSeasonTotalDays(newAssumptions.totalDays);
         setSeasonalCrushingCapacity(newAssumptions.capacity);
-        setInfo("Settings updated. Start a new calculation to apply changes.");
         setActiveCalculationId(null);
+
+        // Persist to the organisation, so the season start is set once rather
+        // than re-entered by every person on every reload. Local state is
+        // already updated above, so a failed save degrades to this session only
+        // rather than losing what was just typed.
+        if (token) {
+            saveSettings(token, {
+                seasonStartDate: isUsableSeasonStart(newAssumptions.startDate)
+                    ? newAssumptions.startDate
+                    : null,
+                seasonTotalDays: newAssumptions.totalDays,
+                seasonalCrushingCapacity: newAssumptions.capacity,
+            })
+                .then(() => setInfo("Settings saved for your organisation. Start a new calculation to apply them."))
+                .catch((e: any) =>
+                    setError(
+                        `Settings applied for this session, but could not be saved: ${e?.message ?? 'unknown error'}`
+                    )
+                );
+        } else {
+            setInfo("Settings updated. Start a new calculation to apply changes.");
+        }
     };
     
     const handleCalculate = useCallback(async (name: string, isScenario: boolean = false, overrideInputs?: Partial<CalculationInputs>) => {
@@ -316,6 +373,23 @@ const AppContent: React.FC = () => {
         }
         if (!currentDate) {
             setError("Please set the current date.");
+            return;
+        }
+        // Refuse rather than calculate on a missing season start. Without this
+        // the date parses to the epoch, week-of-season computes to thousands,
+        // every centre falls into late-season wind-down mode, and the run
+        // returns zero everywhere while still looking like it succeeded. A
+        // visible error beats a silent page of zeros.
+        if (!isUsableSeasonStart(plantStartDate)) {
+            setError(
+                "Set the season start date before calculating. " +
+                "Without it the app cannot tell which week of the season this is, " +
+                "and every centre would come back as zero. Settings → Season Start Date."
+            );
+            return;
+        }
+        if (!can.calculate(currentUser.role)) {
+            setError("Your role can view the numbers but not run a calculation.");
             return;
         }
 
@@ -751,9 +825,31 @@ const AppContent: React.FC = () => {
         return <LoginPage onLoginSuccess={handleLoginSuccess} onNavigate={navigate} />;
     }
     
-    if (page === 'superadmin') return <SuperadminPage onLogout={handleLogout} onImpersonate={impersonate} theme={homePageTheme} onSetTheme={handleSetTheme} supportTickets={supportTickets} onUpdateTicketStatus={handleUpdateTicketStatus} />;
-    if (page === 'team') return <TeamManagementPage onNavigate={navigate} onLogout={handleLogout} />;
-    if (page === 'branding') return <BrandingPage onNavigate={navigate} onLogout={handleLogout} onUpdateBranding={handleUpdateBranding} />;
+    // Role gates. These decide what is RENDERED; the server enforces the same
+    // rules on every request behind them. A viewer who types a URL lands on a
+    // plain refusal rather than a half-working screen.
+    const role = currentUser.role;
+    const denied = (what: string) => (
+        <AccessDenied what={what} role={role} onNavigate={navigate} onLogout={handleLogout} />
+    );
+
+    if (page === 'superadmin') {
+        if (role !== 'superadmin') return denied('the platform console');
+        return <SuperadminPage onLogout={handleLogout} onImpersonate={impersonate} theme={homePageTheme} onSetTheme={handleSetTheme} supportTickets={supportTickets} onUpdateTicketStatus={handleUpdateTicketStatus} />;
+    }
+    if (page === 'team') {
+        if (!can.manageUsers(role)) return denied('team management');
+        return <TeamManagementPage onNavigate={navigate} onLogout={handleLogout} />;
+    }
+    if (page === 'audit') {
+        if (!can.viewAudit(role)) return denied('the activity log');
+        return <AuditPage onNavigate={navigate} onLogout={handleLogout} />;
+    }
+    if (page === 'branding') {
+        if (!can.editBranding(role)) return denied('branding');
+        return <BrandingPage onNavigate={navigate} onLogout={handleLogout} onUpdateBranding={handleUpdateBranding} />;
+    }
+    if (page === 'calculator' && !can.calculate(role)) return denied('the calculator');
     
     if (page === 'dashboard') {
         return <DashboardPage

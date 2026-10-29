@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db';
-import { requireAuth, AuthRequest } from '../middleware/authMiddleware';
+import { requireAuth, AuthRequest, requireRole } from '../middleware/authMiddleware';
 
 const router = Router();
 
@@ -8,7 +8,8 @@ const router = Router();
  * POST /api/calculations
  * Body: { name: string, inputs: any, results: any }
  */
-router.post('/', requireAuth, async (req: AuthRequest, res) => {
+// Running and saving a calculation is an auditor action; a viewer reads only.
+router.post('/', requireAuth, requireRole('auditor'), async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
     const { name, inputs, results } = req.body;
@@ -41,7 +42,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
 /**
  * DELETE /api/calculations/:id
  */
-router.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
+router.delete('/:id', requireAuth, requireRole('auditor'), async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
     const { id } = req.params;

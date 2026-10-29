@@ -3,6 +3,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { pool } from '../db';
 import { requireAuth, AuthRequest } from '../middleware/authMiddleware';
+import { auditFromReq } from '../services/auditLog';
 
 const router = Router();
 
@@ -112,8 +113,12 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
 
 /**
  * Create a user
- * - Admin: can create user/viewer in *their* org
+ * - Admin: can create admin/auditor/viewer in *their* org
  * - Superadmin: can create any role in any org (via orgId in body)
+ *
+ * Note that nobody is created through Microsoft sign-in above viewer: the
+ * directory proves who someone is, not what they are allowed to do. Auditor
+ * and admin are always granted deliberately, here.
  */
 router.post('/', requireAuth, async (req: AuthRequest, res) => {
   try {
@@ -123,10 +128,15 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Missing fields' });
     }
 
+    // Auditors and admins sign in with a password, so it has to be a real one.
+    if (String(password).length < 12) {
+      return res.status(400).json({ error: 'Password must be at least 12 characters' });
+    }
+
     // What roles is this caller allowed to create?
     const callerRole = req.user!.role;
-    const allowedRolesForAdmin = ['user', 'viewer'];
-    const allowedRolesForSuperadmin = ['superadmin', 'admin', 'user', 'viewer'];
+    const allowedRolesForAdmin = ['admin', 'auditor', 'viewer'];
+    const allowedRolesForSuperadmin = ['superadmin', 'admin', 'auditor', 'viewer'];
 
     if (callerRole === 'superadmin') {
       if (!allowedRolesForSuperadmin.includes(role)) {
@@ -134,7 +144,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
       }
     } else if (callerRole === 'admin') {
       if (!allowedRolesForAdmin.includes(role)) {
-        return res.status(403).json({ error: 'Admins can only create user/viewer' });
+        return res.status(403).json({ error: 'Admins can create admin, auditor or viewer' });
       }
     } else {
       return res.status(403).json({ error: 'Only admin/superadmin can create users' });
@@ -150,7 +160,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
     }
 
     // Hash password
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, 12);
 
     // Insert user into DB
     const [result]: any = await pool.query(
@@ -164,6 +174,12 @@ router.post('/', requireAuth, async (req: AuthRequest, res) => {
       'SELECT id, org_id, name, email, role, is_active, created_at FROM users WHERE id = ?',
       [result.insertId]
     );
+
+    await auditFromReq(req, 'user_created', {
+      entity: 'user',
+      entityId: result.insertId,
+      detail: { email, role, orgId: targetOrgId },
+    });
 
     res.json({
       ok: true,

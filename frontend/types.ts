@@ -1,5 +1,12 @@
 
-export type UserRole = 'superadmin' | 'admin' | 'user' | 'viewer';
+/**
+ * Three roles, plus superadmin for platform work across organisations.
+ *
+ *   viewer   read only. This is what signing in with Microsoft grants.
+ *   auditor  runs calculations, uploads data, enters forecasts.
+ *   admin    adds users, reads the audit log, everything else.
+ */
+export type UserRole = 'superadmin' | 'admin' | 'auditor' | 'viewer';
 
 export interface User {
     id: string; // e.g., user_a1b2c3d4
@@ -8,6 +15,9 @@ export interface User {
     name: string;
     organizationId: string;
     role: UserRole;
+    /** 'microsoft' for directory sign-in, 'local' for a password account. */
+    authProvider?: 'local' | 'microsoft';
+    lastLoginAt?: string | null;
     createdAt: string; // ISO 8601 string
 }
 

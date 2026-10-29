@@ -167,9 +167,18 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
         }
 
         const latestCalc = calculationHistory[0];
+        // null and '' must fall through to the fallback. new Date(null) is the
+        // EPOCH, not an invalid date, so an isNaN check alone lets 1970 past —
+        // which is how an unset season start silently became 01/01/1970 and put
+        // every calculation into late-season wind-down mode.
         const safeDate = (val: any, fallback: Date) => {
+            if (val === null || val === undefined || val === '') return fallback;
             const d = val instanceof Date ? val : new Date(val);
-            return isNaN(d.getTime()) ? fallback : d;
+            if (isNaN(d.getTime())) return fallback;
+            // Nothing in this app predates the app. A date this old means a
+            // parse fell through to the epoch somewhere upstream.
+            if (d.getFullYear() < 2000) return fallback;
+            return d;
         };
         const currentDate = safeDate(latestCalc.inputs.currentDate, new Date());
         const plantStartDate = safeDate(parseDate(latestCalc.inputs.plantStartDate), new Date(new Date().getFullYear(), 9, 1));

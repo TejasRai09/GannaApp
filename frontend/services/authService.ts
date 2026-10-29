@@ -9,12 +9,6 @@ interface LoginResponse {
     error?: string;
 }
 
-interface SignupResponse {
-    ok?: boolean;
-    error?: string;
-    userId?: number;
-}
-
 export interface AuthSession {
     token: string;
     user: User;
@@ -24,9 +18,13 @@ const mapUser = (raw: any): User => ({
     id: String(raw.id ?? raw.user_id ?? ''),
     email: raw.email ?? '',
     name: raw.name ?? raw.full_name ?? raw.username ?? '',
-    role: (raw.role ?? 'user') as User['role'],
-    organizationId: String(raw.org_id ?? raw.organization_id ?? raw.organizationId ?? ''),
-    createdAt: raw.created_at ?? new Date().toISOString(),
+    // Least privilege when the server sends something unexpected: an unknown
+    // role must never be read as more access than it is.
+    role: (raw.role ?? 'viewer') as User['role'],
+    organizationId: String(raw.orgId ?? raw.org_id ?? raw.organization_id ?? raw.organizationId ?? ''),
+    authProvider: (raw.authProvider ?? raw.auth_provider ?? 'local') as User['authProvider'],
+    lastLoginAt: raw.lastLoginAt ?? raw.last_login_at ?? null,
+    createdAt: raw.createdAt ?? raw.created_at ?? new Date().toISOString(),
 });
 
 export const authService = {
@@ -43,16 +41,35 @@ export const authService = {
         return { token: data.token, user: mapUser(data.user) };
     },
 
-    async signup(orgId: number, name: string, email: string, password: string): Promise<void> {
-        const resp = await fetch(`${API_BASE}/auth/signup`, {
+    /**
+     * Sign in with Microsoft.
+     *
+     * The ID token is posted to the server, which verifies its signature
+     * against Microsoft's published keys before trusting a single claim in it.
+     * A first-time signer is provisioned as a VIEWER: the directory proves who
+     * someone is, not what they may do.
+     */
+    async loginWithMicrosoft(idToken: string): Promise<AuthSession> {
+        const resp = await fetch(`${API_BASE}/auth/microsoft`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orgId, name, email, password })
+            body: JSON.stringify({ idToken })
         });
-        const data: SignupResponse = await resp.json().catch(() => ({ ok: false, error: 'Invalid response' }));
-        if (!resp.ok || data.ok === false) {
-            throw new Error(data.error || 'Signup failed');
+        const data: LoginResponse = await resp.json().catch(() => ({ ok: false, error: 'Invalid response' } as any));
+        if (!resp.ok || !data.ok) {
+            throw new Error(data.error || 'Microsoft sign-in failed');
         }
+        return { token: data.token, user: mapUser(data.user) };
+    },
+
+    async changePassword(token: string, currentPassword: string, newPassword: string): Promise<void> {
+        const resp = await fetch(`${API_BASE}/auth/change-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        const data: any = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) throw new Error(data.error || 'Could not change the password');
     },
 
     async impersonate(token: string, userId: string): Promise<AuthSession> {

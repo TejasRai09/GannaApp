@@ -1,5 +1,6 @@
 import React from 'react';
-import { LogOut, HelpCircle, LayoutGrid, Users, Settings, Info, UserX, Building2, BarChart3 } from 'lucide-react';
+import { LogOut, HelpCircle, LayoutGrid, Users, Settings, Info, UserX, Building2, BarChart3, ScrollText } from 'lucide-react';
+import { can, ROLE_LABEL } from '../../services/permissions';
 import type { Page } from '../../App';
 import { useAuth } from '../../context/AuthContext';
 
@@ -15,8 +16,13 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ pageTitle, onNavigate, onLogout, showSettings, showLogic, onOpenSettings, onOpenLogic }) => {
     const { currentUser, impersonator, stopImpersonating, currentOrganization } = useAuth();
-    const isAdmin = currentUser?.role === 'admin';
-    const isSuperAdmin = currentUser?.role === 'superadmin';
+    // Driven by the shared permission table rather than a role string compared
+    // by hand, so a new role cannot quietly lose or gain a button here.
+    const role = currentUser?.role;
+    const isSuperAdmin = role === 'superadmin';
+    const showTeam = can.manageUsers(role);
+    const showBranding = can.editBranding(role);
+    const showAudit = can.viewAudit(role);
     const displayName = currentUser?.name || currentUser?.email || '';
     const orgName = currentOrganization?.name;
 
@@ -67,18 +73,28 @@ export const Header: React.FC<HeaderProps> = ({ pageTitle, onNavigate, onLogout,
                         <div className="hidden sm:flex flex-col items-end leading-tight text-right">
                             <span className="text-sm text-slate-500">Hi,</span>
                             <span className="text-sm font-semibold text-slate-800" title={displayName}>{displayName}</span>
-                            {orgName && <span className="text-xs text-slate-500" title={orgName}>{orgName}</span>}
+                            <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                                {role && (
+                                    <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold text-[10px] uppercase tracking-wide">
+                                        {ROLE_LABEL[role]}
+                                    </span>
+                                )}
+                                {orgName && <span title={orgName}>{orgName}</span>}
+                            </span>
                         </div>
                     )}
-                    {isAdmin && (
-                        <>
-                            <button onClick={() => onNavigate('team')} className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-700 font-semibold text-sm rounded-lg hover:bg-slate-200 transition-colors" aria-label="Manage Team">
-                                <Users size={16} /> Team
-                            </button>
-                            <button onClick={() => onNavigate('branding')} className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-700 font-semibold text-sm rounded-lg hover:bg-slate-200 transition-colors" aria-label="Branding Settings">
-                                <Building2 size={16} /> Branding
-                            </button>
-                        </>
+                    {showTeam && (
+                        <button onClick={() => onNavigate('team')} className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-700 font-semibold text-sm rounded-lg hover:bg-slate-200 transition-colors" aria-label="Manage Team">
+                            <Users size={16} /> Team
+                        </button>
+                    )}
+                    {showAudit && (
+                        <button onClick={() => onNavigate('audit')} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors" aria-label="Activity Log"><ScrollText size={20} /></button>
+                    )}
+                    {showBranding && (
+                        <button onClick={() => onNavigate('branding')} className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-700 font-semibold text-sm rounded-lg hover:bg-slate-200 transition-colors" aria-label="Branding Settings">
+                            <Building2 size={16} /> Branding
+                        </button>
                     )}
                     {showLogic && <button onClick={onOpenLogic} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors" aria-label="Show calculation logic"><Info size={20} /></button>}
                     {!isSuperAdmin && <button onClick={() => onNavigate('variance')} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors" aria-label="Variance & Scorecard"><BarChart3 size={20} /></button>}

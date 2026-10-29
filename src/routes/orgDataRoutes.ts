@@ -1,7 +1,7 @@
 // backend/src/routes/orgDataRoutes.ts
 import { Router } from 'express';
 import { pool } from '../db';
-import { requireAuth, AuthRequest } from '../middleware/authMiddleware';
+import { requireAuth, AuthRequest, requireRole } from '../middleware/authMiddleware';
 
 const router = Router();
 
@@ -41,7 +41,8 @@ router.get('/my-org', requireAuth, async (req: AuthRequest, res) => {
  * Body: { fileName: string, data: any[] }
  * Saves / overwrites the file for this org + type
  */
-router.post('/:type', requireAuth, async (req: AuthRequest, res) => {
+// Uploading or replacing source data is an auditor action.
+router.post('/:type', requireAuth, requireRole('auditor'), async (req: AuthRequest, res) => {
   try {
     const orgId = req.user!.orgId;
     const rawType = req.params.type;

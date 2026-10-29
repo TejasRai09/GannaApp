@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db';
-import { requireAuth, AuthRequest } from '../middleware/authMiddleware';
+import { requireAuth, AuthRequest, requireRole } from '../middleware/authMiddleware';
 
 const router = Router();
 
@@ -59,7 +59,7 @@ router.get('/reason-codes', requireAuth, (_req, res) => {
 //
 // Body: { deliveryDate: 'YYYY-MM-DD', runId?: number, rows: [...] }
 // ---------------------------------------------------------------------------
-router.post('/predictions', requireAuth, async (req: AuthRequest, res) => {
+router.post('/predictions', requireAuth, requireRole('auditor'), async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
     const { deliveryDate, runId, rows } = req.body;
@@ -142,7 +142,7 @@ router.post('/predictions', requireAuth, async (req: AuthRequest, res) => {
 //
 // Sending plantExpectedArrival: null clears the whole entry.
 // ---------------------------------------------------------------------------
-router.put('/plant', requireAuth, async (req: AuthRequest, res) => {
+router.put('/plant', requireAuth, requireRole('auditor'), async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
     const {
@@ -230,7 +230,7 @@ router.put('/plant', requireAuth, async (req: AuthRequest, res) => {
 // once with the indent placed, once later with the arrival.
 // Only non-null fields are written, so the arrival pass cannot erase the indent.
 // ---------------------------------------------------------------------------
-router.post('/outcomes', requireAuth, async (req: AuthRequest, res) => {
+router.post('/outcomes', requireAuth, requireRole('auditor'), async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
     const { deliveryDate, rows, source } = req.body;
