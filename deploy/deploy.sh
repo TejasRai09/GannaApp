@@ -25,6 +25,24 @@ echo "==> Pulling latest code"
 git fetch origin
 git reset --hard origin/main
 
+# Schema migrations. Every file in deploy/migrations must be safe to re-run
+# (CREATE TABLE IF NOT EXISTS, column-exists guards, UPDATE ... WHERE col IS
+# NULL), so the whole directory is simply applied in order on every deploy.
+# That keeps a tracking table out of the picture, which is the right trade for
+# an app this size — but it does mean a non-idempotent migration would be
+# re-applied, so new ones must keep that property.
+if compgen -G "deploy/migrations/*.sql" > /dev/null; then
+  echo "==> Applying schema migrations"
+  # shellcheck disable=SC1091
+  set -a; . ./.env; set +a
+  for f in $(ls deploy/migrations/*.sql | sort); do
+    echo "    - $(basename "$f")"
+    mysql --host="${DB_HOST}" --port="${DB_PORT:-3306}" \
+          --user="${DB_USER}" --password="${DB_PASSWORD}" \
+          "${DB_NAME}" < "$f"
+  done
+fi
+
 # devDependencies are needed on the server: TypeScript builds the backend,
 # Vite + Tailwind build the frontend. This app is small, so that is fine.
 echo "==> Installing backend dependencies"
