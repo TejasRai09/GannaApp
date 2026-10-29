@@ -25,6 +25,16 @@ echo "==> Pulling latest code"
 git fetch origin
 git reset --hard origin/main
 
+# The pull above can rewrite THIS script. Bash has already read the old copy
+# from disk, so any step added by the pull would be silently skipped — which is
+# exactly how a release once went out with its schema migration never applied.
+# Re-exec once, under a guard, so the rest of the deploy always runs the version
+# that was just pulled.
+if [ "${DEPLOY_REEXEC:-}" != "1" ]; then
+  echo "==> Re-running with the freshly pulled script"
+  DEPLOY_REEXEC=1 exec bash "${ROOT}/deploy/deploy.sh" "$@"
+fi
+
 # Schema migrations. Every file in deploy/migrations must be safe to re-run
 # (CREATE TABLE IF NOT EXISTS, column-exists guards, UPDATE ... WHERE col IS
 # NULL), so the whole directory is simply applied in order on every deploy.
