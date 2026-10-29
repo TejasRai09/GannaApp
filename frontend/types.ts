@@ -139,6 +139,22 @@ export interface CalculationInputs {
      *  season is in its wind-down phase (week >= 14), the ML recommendation level follows
      *  this plan (split across centres by throughput share) instead of requirement/maturity. */
     plannedDailyIndent?: number;
+
+    /**
+     * Operating parameters, configured per organisation. Each is optional and
+     * each falls back to the value that was previously hardcoded, so omitting
+     * them produces exactly the results the compiled-in constants did.
+     */
+    /** Days between placing an indent and the delivery it is raised for. Was 3. */
+    deliveryLagDays?: number;
+    /** From this week of the season, follow the mill's own latest placement. Was 14. */
+    lateSeasonWeek?: number;
+    /** Window of recent arrivals used to split the requirement by centre. Was 14. */
+    throughputWindowDays?: number;
+    /** Below this recent D-weight, fall back to the season average. Was 0.1. */
+    dweightFallbackThreshold?: number;
+    /** How a gate centre is recognised in its name. Was the literal 'GATE'. */
+    gateMatchPattern?: string;
 }
 
 

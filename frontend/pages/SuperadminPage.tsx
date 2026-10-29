@@ -3,7 +3,9 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Header } from '../components/common/Header';
 import { useUsers } from '../hooks/useUsers';
 import type { User, Organization, SupportTicket, SupportTicketStatus } from '../types';
-import { Building, Users, Plus, BarChart2, UserCheck, Search, LogIn, Palette, Save, CheckCircle, Ticket, Trash2 } from 'lucide-react';
+import { Building, Users, Plus, BarChart2, UserCheck, Search, LogIn, Palette, Save, CheckCircle, Ticket, Trash2, CalendarRange } from 'lucide-react';
+import { SeasonControl } from '../components/SeasonControl';
+import { useAuth } from '../context/AuthContext';
 import { timeAgo } from '../utils/utils';
 import type { HomePageTheme } from '../App';
 import { formatDateTimeGB } from '../services/dateUtils';
@@ -40,7 +42,11 @@ export const SuperadminPage: React.FC<SuperadminPageProps> = (props) => {
     const { onLogout, onImpersonate, theme, onSetTheme, supportTickets, onUpdateTicketStatus } = props;
     const { users, organizations, addUser, addOrganization, deleteUser, deleteOrganization, error } = useUsers();
     
-    const [activeTab, setActiveTab] = useState<'dashboard' |'orgs' | 'users' | 'tickets'>('dashboard');
+    const [activeTab, setActiveTab] = useState<'dashboard' |'orgs' | 'users' | 'tickets' | 'seasons'>('dashboard');
+    const { token } = useAuth();
+    // Which organisation the season and parameter screens act on. Defaults to
+    // the first, so the common single-mill case needs no selection.
+    const [seasonOrgId, setSeasonOrgId] = useState<string>('');
     const [searchTerm, setSearchTerm] = useState('');
     
     const [newOrgName, setNewOrgName] = useState('');
@@ -169,6 +175,7 @@ export const SuperadminPage: React.FC<SuperadminPageProps> = (props) => {
                         <nav className="flex space-x-2 p-2 overflow-x-auto">
                              <button onClick={() => setActiveTab('dashboard')} className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold rounded-lg transition-colors ${activeTab === 'dashboard' ? 'bg-[#e6f0ff] text-[#003580]' : 'text-slate-500 hover:bg-slate-100'}`}><BarChart2 size={16}/> Dashboard</button>
                             <button onClick={() => setActiveTab('orgs')} className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold rounded-lg transition-colors ${activeTab === 'orgs' ? 'bg-[#e6f0ff] text-[#003580]' : 'text-slate-500 hover:bg-slate-100'}`}><Building size={16}/> Organizations</button>
+                            <button onClick={() => setActiveTab('seasons')} className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold rounded-lg transition-colors ${activeTab === 'seasons' ? 'bg-[#e6f0ff] text-[#003580]' : 'text-slate-500 hover:bg-slate-100'}`}><CalendarRange size={16}/> Seasons &amp; Model</button>
                             <button onClick={() => setActiveTab('users')} className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold rounded-lg transition-colors ${activeTab === 'users' ? 'bg-[#e6f0ff] text-[#003580]' : 'text-slate-500 hover:bg-slate-100'}`}><Users size={16}/> Users</button>
                             <button onClick={() => setActiveTab('tickets')} className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold rounded-lg transition-colors ${activeTab === 'tickets' ? 'bg-[#e6f0ff] text-[#003580]' : 'text-slate-500 hover:bg-slate-100'}`}><Ticket size={16}/> Support Tickets</button>
                         </nav>
@@ -237,6 +244,29 @@ export const SuperadminPage: React.FC<SuperadminPageProps> = (props) => {
                                         <form onSubmit={handleAddOrg} className="space-y-3"><input type="text" value={newOrgName} onChange={e => setNewOrgName(e.target.value)} className="block w-full px-3 py-2 border rounded-md text-sm" placeholder="Org Name" required /><button type="submit" className="w-full flex justify-center items-center gap-2 px-4 py-2 bg-[#003580] text-white font-semibold rounded-lg hover:bg-[#002a66]"><Plus size={18}/> Create</button></form>
                                     </div>
                                 </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'seasons' && token && (
+                            <div className="space-y-4">
+                                {organizations.length > 1 && (
+                                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center gap-3">
+                                        <label htmlFor="seasonOrg" className="text-sm font-semibold text-slate-700">Organisation</label>
+                                        <select
+                                            id="seasonOrg"
+                                            value={seasonOrgId || organizations[0]?.id || ''}
+                                            onChange={(e) => setSeasonOrgId(e.target.value)}
+                                            className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                                        >
+                                            {organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                                        </select>
+                                    </div>
+                                )}
+                                <SeasonControl
+                                    token={token}
+                                    orgId={Number(seasonOrgId || organizations[0]?.id) || undefined}
+                                    orgName={organizations.find(o => o.id === (seasonOrgId || organizations[0]?.id))?.name}
+                                />
                             </div>
                         )}
 

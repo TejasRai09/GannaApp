@@ -94,7 +94,7 @@ const normalizePurchases = (data: any[], centerMapping: { [key: string]: string 
     ) as NormalizedPurchase[];
 };
 
-const normalizeBonding = (data: any[], centerMapping: { [key: string]: string }): NormalizedBonding[] => {
+const normalizeBonding = (data: any[], centerMapping: { [key: string]: string }, gatePattern = 'GATE'): NormalizedBonding[] => {
     const bondingByCenter = new Map<string, { name: string; qty: number }>();
     data.forEach(row => {
         const originalId = findValue(row, ['Code'])?.trim();
@@ -115,7 +115,7 @@ const normalizeBonding = (data: any[], centerMapping: { [key: string]: string })
         centreId,
         centreName: data.name,
         qty: data.qty,
-        isGate: data.name.toUpperCase().trim().includes('GATE'),
+        isGate: data.name.toUpperCase().trim().includes(gatePattern.toUpperCase().trim()),
     }));
 };
 
@@ -202,7 +202,11 @@ const deriveMaturityWeights = (
     purchases: NormalizedPurchase[], 
     bonding: NormalizedBonding[],
     currentDate: Date,
-    plantStartDate: Date
+    plantStartDate: Date,
+    // Below this recent D-weight, fall back to the season average. A centre
+    // with almost no recent deliveries would otherwise read as a near-zero
+    // delivery rate and be ordered enormous quantities.
+    dweightFallbackThreshold = 0.1
 ): MaturityWeightsResult => {
     const bondingMap = new Map(bonding.map(b => [b.centreId, b.centreName]));
     
@@ -249,10 +253,10 @@ const deriveMaturityWeights = (
         const season_avg_d3 = calculateAverageOfPositiveRatios(seasonAnalyses, 'd3');
         const season_avg_d4 = calculateAverageOfPositiveRatios(seasonAnalyses, 'd4');
         
-        const d1 = recent_avg_d1 < 0.1 ? season_avg_d1 : recent_avg_d1;
-        const d2 = recent_avg_d2 < 0.1 ? season_avg_d2 : recent_avg_d2;
-        const d3 = recent_avg_d3 < 0.1 ? season_avg_d3 : recent_avg_d3;
-        const d4 = recent_avg_d4 < 0.1 ? season_avg_d4 : recent_avg_d4;
+        const d1 = recent_avg_d1 < dweightFallbackThreshold ? season_avg_d1 : recent_avg_d1;
+        const d2 = recent_avg_d2 < dweightFallbackThreshold ? season_avg_d2 : recent_avg_d2;
+        const d3 = recent_avg_d3 < dweightFallbackThreshold ? season_avg_d3 : recent_avg_d3;
+        const d4 = recent_avg_d4 < dweightFallbackThreshold ? season_avg_d4 : recent_avg_d4;
 
         const weights = { d1, d2, d3, d4 };
         centerWeights.set(center.centreId, weights);
@@ -260,10 +264,10 @@ const deriveMaturityWeights = (
         centerDWeights.push({
             centreId: center.centreId, centreName: center.centreName,
             ...weights,
-            d1_fallback_used: recent_avg_d1 < 0.1, recent_avg_d1,
-            d2_fallback_used: recent_avg_d2 < 0.1, recent_avg_d2,
-            d3_fallback_used: recent_avg_d3 < 0.1, recent_avg_d3,
-            d4_fallback_used: recent_avg_d4 < 0.1, recent_avg_d4,
+            d1_fallback_used: recent_avg_d1 < dweightFallbackThreshold, recent_avg_d1,
+            d2_fallback_used: recent_avg_d2 < dweightFallbackThreshold, recent_avg_d2,
+            d3_fallback_used: recent_avg_d3 < dweightFallbackThreshold, recent_avg_d3,
+            d4_fallback_used: recent_avg_d4 < dweightFallbackThreshold, recent_avg_d4,
         });
     }
 
@@ -328,24 +332,30 @@ const deriveMaturityWeights = (
 };
 
 
-const calculateForecasts = (indents: NormalizedIndent[], centerWeights: Map<string, DWeights>, currentDate: Date, bonding: NormalizedBonding[]): { forecastBreakdown: ForecastBreakdownRow[], totalForecastT3: number } => {
-    const t_plus_1 = addDays(currentDate, 1);
-    const t_plus_2 = addDays(currentDate, 2);
-    const today = currentDate;
+const calculateForecasts = (indents: NormalizedIndent[], centerWeights: Map<string, DWeights>, currentDate: Date, bonding: NormalizedBonding[], deliveryLagDays = 3): { forecastBreakdown: ForecastBreakdownRow[], totalForecastT3: number } => {
+    // Cane already on its way to the delivery day, from orders placed earlier.
+    // The lookback is relative to the DELIVERY day, not to today: an order for
+    // the day before delivery lands its d2 portion on it, two days before its
+    // d3, three days before its d4. That is the shape of the four-bucket
+    // D-weight model and is independent of how far ahead orders are placed.
+    const deliveryDate = addDays(currentDate, deliveryLagDays);
+    const minus_1 = addDays(deliveryDate, -1);
+    const minus_2 = addDays(deliveryDate, -2);
+    const minus_3 = addDays(deliveryDate, -3);
 
     let totalForecastT3 = 0;
     const forecastBreakdown = bonding.map(b => {
         const weights = centerWeights.get(b.centreId) || {d1:0,d2:0,d3:0,d4:0};
-        const indent_t2 = indents.find(i => i.centreId === b.centreId && isSameDay(i.raisedFor, t_plus_2));
-        const indent_t1 = indents.find(i => i.centreId === b.centreId && isSameDay(i.raisedFor, t_plus_1));
-        const indent_t0 = indents.find(i => i.centreId === b.centreId && isSameDay(i.raisedFor, today));
+        const indent_t2 = indents.find(i => i.centreId === b.centreId && isSameDay(i.raisedFor, minus_1));
+        const indent_t1 = indents.find(i => i.centreId === b.centreId && isSameDay(i.raisedFor, minus_2));
+        const indent_t0 = indents.find(i => i.centreId === b.centreId && isSameDay(i.raisedFor, minus_3));
 
         const d2_contribution: ForecastContribution = { indentDate: indent_t2?.raisedFor ?? null, indentQty: indent_t2?.qty || 0, weight: weights.d2, result: (indent_t2?.qty || 0) * weights.d2 };
         const d3_contribution: ForecastContribution = { indentDate: indent_t1?.raisedFor ?? null, indentQty: indent_t1?.qty || 0, weight: weights.d3, result: (indent_t1?.qty || 0) * weights.d3 };
         const d4_contribution: ForecastContribution = { indentDate: indent_t0?.raisedFor ?? null, indentQty: indent_t0?.qty || 0, weight: weights.d4, result: (indent_t0?.qty || 0) * weights.d4 };
         
         // D1 contribution is not from a past indent, it will be from the new indent. Initialize it as zero.
-        const d1_contribution: ForecastContribution = { indentDate: addDays(currentDate, 3), indentQty: 0, weight: weights.d1, result: 0 };
+        const d1_contribution: ForecastContribution = { indentDate: deliveryDate, indentQty: 0, weight: weights.d1, result: 0 };
 
         const centerForecast = d2_contribution.result + d3_contribution.result + d4_contribution.result;
         totalForecastT3 += centerForecast;
@@ -367,17 +377,20 @@ const calculateOpenIndentMatrix = (
     centerWeights: Map<string, DWeights>,
     bonding: NormalizedBonding[],
     currentDate: Date,
-    recommendedIndents: IndentResultRow[]
+    recommendedIndents: IndentResultRow[],
+    deliveryLagDays = 3
 ): { matrix: OpenIndentMatrixData[], headers: Date[] } => {
-    const startDate = addDays(currentDate, -3);
-    const endDate = addDays(currentDate, 6); // Extended to T+6
+    // Window keeps its shape whatever the lag: back one lead time, forward to
+    // the delivery day plus the three days cane keeps arriving over.
+    const startDate = addDays(currentDate, -deliveryLagDays);
+    const endDate = addDays(currentDate, deliveryLagDays + 3);
 
     const headers: Date[] = [];
     for (let d = new Date(startDate); d <= endDate; d.setUTCDate(d.getUTCDate() + 1)) {
         headers.push(new Date(d));
     }
 
-    const t_plus_3 = addDays(currentDate, 3);
+    const t_plus_3 = addDays(currentDate, deliveryLagDays);
     const recommendedIndentsMap = new Map(recommendedIndents.map(i => [i.centreId, i.indentToRaise]));
     
     const newIndentRow: NormalizedIndent[] = bonding.map(b => ({
@@ -387,7 +400,7 @@ const calculateOpenIndentMatrix = (
     }));
 
     const openIndentDates = new Set<string>();
-    for (let d = new Date(addDays(currentDate, -3)); d <= t_plus_3; d.setUTCDate(d.getUTCDate() + 1)) {
+    for (let d = new Date(addDays(currentDate, -deliveryLagDays)); d <= t_plus_3; d.setUTCDate(d.getUTCDate() + 1)) {
         openIndentDates.add(d.toISOString());
     }
 
@@ -465,19 +478,27 @@ const calculateOpenIndentMatrix = (
 export const calculateRecommendedIndents = (inputs: CalculationInputs): CalculationResults => {
     const { bondingData, indentData, purchaseData, plantCapacity, totalDailyRequirement, currentDate, centerMapping, standardStockCentre, standardStockGate, availableStockCentre, availableStockGate, plantStartDate: plantStartDateStr, constraints, plannedDailyIndent } = inputs;
 
+    // Operating parameters. Each falls back to the value that was hardcoded
+    // here before, so an input that omits them produces identical results.
+    const DELIVERY_LAG  = inputs.deliveryLagDays ?? 3;
+    const LATE_SEASON_WEEK = inputs.lateSeasonWeek ?? 14;
+    const TP_WINDOW_DAYS   = inputs.throughputWindowDays ?? 14;
+    const DWEIGHT_FALLBACK = inputs.dweightFallbackThreshold ?? 0.1;
+    const GATE_PATTERN     = inputs.gateMatchPattern ?? 'GATE';
+
     const plantStartDate = parseDate(plantStartDateStr) || new Date();
     
-    const nBonding = normalizeBonding(bondingData, centerMapping);
+    const nBonding = normalizeBonding(bondingData, centerMapping, GATE_PATTERN);
     const nIndents = normalizeIndents(indentData, centerMapping);
     const nPurchases = normalizePurchases(purchaseData, centerMapping);
 
     const { centerWeights, globalWeights, closedIndentAnalysis, centerDWeights, maturityAnalysisPurchases, fullSeasonAnalysis, seasonDWeights,
-            mlLagCentreRecent, mlLagCentreLong, mlLagPlantRecent } = deriveMaturityWeights(nIndents, nPurchases, nBonding, currentDate, plantStartDate);
+            mlLagCentreRecent, mlLagCentreLong, mlLagPlantRecent } = deriveMaturityWeights(nIndents, nPurchases, nBonding, currentDate, plantStartDate, DWEIGHT_FALLBACK);
     
-    const { forecastBreakdown, totalForecastT3 } = calculateForecasts(nIndents, centerWeights, currentDate, nBonding);
+    const { forecastBreakdown, totalForecastT3 } = calculateForecasts(nIndents, centerWeights, currentDate, nBonding, DELIVERY_LAG);
 
     // --- PHASE 3: Logic Engine for Constraints ---
-    const t_plus_3 = addDays(currentDate, 3);
+    const t_plus_3 = addDays(currentDate, DELIVERY_LAG);
     const riskAnalysis: RiskAnalysisItem[] = [];
 
     // 1. Mill Constraint Logic (Demand Side)
@@ -574,11 +595,11 @@ export const calculateRecommendedIndents = (inputs: CalculationInputs): Calculat
     // wholly to centre code 1 (Bonding!G2); ALL other rows — including named sub-gates
     // like "GATE (AIRA)" — share the centre stock difference (Bonding!G3+).
     const EMPTY_MAPPING: { [key: string]: string } = {};
-    const nBondingRaw = normalizeBonding(bondingData, EMPTY_MAPPING);
+    const nBondingRaw = normalizeBonding(bondingData, EMPTY_MAPPING, GATE_PATTERN);
     const nIndentsRaw = normalizeIndents(indentData, EMPTY_MAPPING);
     const nPurchasesRaw = normalizePurchases(purchaseData, EMPTY_MAPPING);
-    const rawWeights = deriveMaturityWeights(nIndentsRaw, nPurchasesRaw, nBondingRaw, currentDate, plantStartDate).centerWeights;
-    const rawForecasts = calculateForecasts(nIndentsRaw, rawWeights, currentDate, nBondingRaw).forecastBreakdown;
+    const rawWeights = deriveMaturityWeights(nIndentsRaw, nPurchasesRaw, nBondingRaw, currentDate, plantStartDate, DWEIGHT_FALLBACK).centerWeights;
+    const rawForecasts = calculateForecasts(nIndentsRaw, rawWeights, currentDate, nBondingRaw, DELIVERY_LAG).forecastBreakdown;
     const totalBondingRaw = nBondingRaw.reduce((s, b) => s + b.qty, 0);
     const totalBondingCentreRaw = nBondingRaw.filter(b => b.centreId !== '1').reduce((s, b) => s + b.qty, 0);
     const excelByDisplay = new Map<string, number>();
@@ -611,12 +632,10 @@ export const calculateRecommendedIndents = (inputs: CalculationInputs): Calculat
     const isGateMap = new Map(nBonding.map(b => [b.centreId, b.isGate]));
 
     // ML requirement allocation: last-14-day actual throughput share
-    const TP_WINDOW_DAYS = 14;
     const tpLo = addDays(currentDate, -TP_WINDOW_DAYS).getTime();
     const tpHi = addDays(currentDate, -1).getTime();
-    // From week 14 the season is in wind-down: recommendations switch to "follow mode"
-    // (see the late-season block below).
-    const LATE_SEASON_WEEK = 14;
+    // From LATE_SEASON_WEEK the season is in wind-down: recommendations switch
+    // to "follow mode" (see the late-season block below).
     const tpByCentre = new Map<string, number>();
     let tpTotal = 0;
     for (const p of nPurchases) {
@@ -726,7 +745,7 @@ export const calculateRecommendedIndents = (inputs: CalculationInputs): Calculat
     const overallBand = getOverallBand(weekOfSeason, phase as BandPhase);
     const overallAdjustmentFactor = 1.0; // no scaling — matches Excel
     
-    const { matrix, headers } = calculateOpenIndentMatrix(nIndents, nPurchases, centerWeights, nBonding, currentDate, tableData);
+    const { matrix, headers } = calculateOpenIndentMatrix(nIndents, nPurchases, centerWeights, nBonding, currentDate, tableData, DELIVERY_LAG);
 
     return {
         dWeights: globalWeights,

@@ -4,7 +4,8 @@ import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { AuditPage } from './pages/AuditPage';
 import { AccessDenied } from './components/common/AccessDenied';
-import { getSettings, saveSettings, isUsableSeasonStart } from './services/settingsService';
+import { isUsableSeasonStart } from './services/settingsService';
+import { getOrgSettings, saveOrgSettings, type OrgSettings } from './services/seasonService';
 import { can } from './services/permissions';
 import { SignupPage } from './pages/SignupPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -59,6 +60,9 @@ const AppContent: React.FC = () => {
     // this holds a real date rather than guessing one.
     const [plantStartDate, setPlantStartDate] = useState<string>('');
     const [settingsLoaded, setSettingsLoaded] = useState<boolean>(false);
+    // Operating parameters, configured per organisation. Null until loaded; the
+    // calculation falls back to its own built-in defaults in that case.
+    const [orgSettings, setOrgSettings] = useState<OrgSettings | null>(null);
     const [seasonTotalDays, setSeasonTotalDays] = useState<number>(180);
     const [seasonalCrushingCapacity, setSeasonalCrushingCapacity] = useState<number>(18000000);
     const [plantCapacity, setPlantCapacity] = useState<number>(80);
@@ -220,8 +224,9 @@ const AppContent: React.FC = () => {
         let cancelled = false;
         (async () => {
             try {
-                const { settings } = await getSettings(token);
+                const { settings } = await getOrgSettings(token);
                 if (cancelled) return;
+                setOrgSettings(settings);
                 if (isUsableSeasonStart(settings.seasonStartDate)) {
                     setPlantStartDate(settings.seasonStartDate!);
                 }
@@ -229,6 +234,11 @@ const AppContent: React.FC = () => {
                 if (settings.seasonalCrushingCapacity) {
                     setSeasonalCrushingCapacity(settings.seasonalCrushingCapacity);
                 }
+                // Daily defaults, pre-filled rather than hardcoded in this file.
+                if (settings.defaultDailyRequirement) setTotalDailyRequirement(settings.defaultDailyRequirement);
+                if (settings.standardStockCentre) setStandardStockCentre(settings.standardStockCentre);
+                if (settings.standardStockGate) setStandardStockGate(settings.standardStockGate);
+                if (settings.plantCapacity) setPlantCapacity(settings.plantCapacity);
             } catch {
                 // A settings failure must not block the rest of the app; the
                 // calculate guard below still prevents a bad run.
@@ -332,32 +342,42 @@ const AppContent: React.FC = () => {
         if (!currentUser || !currentUser.organizationId) return;
 
         setCenterMapping(newMapping);
+        setActiveCalculationId(null);
+
+        // The season start, length and capacity are facts about the SEASON, and
+        // a season is a record a superadmin owns. Changing them here would set
+        // them for this browser only and quietly disagree with what everyone
+        // else sees, so they are applied for this session and the operator is
+        // told where they actually live.
+        const seasonTouched =
+            newAssumptions.startDate !== plantStartDate
+            || newAssumptions.totalDays !== seasonTotalDays
+            || newAssumptions.capacity !== seasonalCrushingCapacity;
+
         setPlantStartDate(newAssumptions.startDate);
         setSeasonTotalDays(newAssumptions.totalDays);
         setSeasonalCrushingCapacity(newAssumptions.capacity);
-        setActiveCalculationId(null);
 
-        // Persist to the organisation, so the season start is set once rather
-        // than re-entered by every person on every reload. Local state is
-        // already updated above, so a failed save degrades to this session only
-        // rather than losing what was just typed.
-        if (token) {
-            saveSettings(token, {
-                seasonStartDate: isUsableSeasonStart(newAssumptions.startDate)
-                    ? newAssumptions.startDate
-                    : null,
-                seasonTotalDays: newAssumptions.totalDays,
-                seasonalCrushingCapacity: newAssumptions.capacity,
-            })
-                .then(() => setInfo("Settings saved for your organisation. Start a new calculation to apply them."))
-                .catch((e: any) =>
-                    setError(
-                        `Settings applied for this session, but could not be saved: ${e?.message ?? 'unknown error'}`
-                    )
-                );
-        } else {
+        if (!token) {
             setInfo("Settings updated. Start a new calculation to apply changes.");
+            return;
         }
+
+        // Only the daily operating defaults are the auditor's to persist.
+        saveOrgSettings(token, {
+            defaultDailyRequirement: totalDailyRequirement,
+            standardStockCentre,
+            standardStockGate,
+            plantCapacity,
+        })
+            .then(() => setInfo(
+                seasonTouched
+                    ? "Daily defaults saved. The season dates apply to this session only — ask a superadmin to change the season record so everyone sees the same thing."
+                    : "Daily defaults saved for your organisation. Start a new calculation to apply them."
+            ))
+            .catch((e: any) =>
+                setError(`Applied for this session, but could not be saved: ${e?.message ?? 'unknown error'}`)
+            );
     };
     
     const handleCalculate = useCallback(async (name: string, isScenario: boolean = false, overrideInputs?: Partial<CalculationInputs>) => {
@@ -414,6 +434,13 @@ const AppContent: React.FC = () => {
                 seasonTotalDays,
                 seasonalCrushingCapacity,
                 constraints,
+                // Operating parameters. Omitted when settings have not loaded,
+                // in which case the calculation uses the same defaults it always had.
+                deliveryLagDays: orgSettings?.deliveryLagDays,
+                lateSeasonWeek: orgSettings?.lateSeasonWeek,
+                throughputWindowDays: orgSettings?.throughputWindowDays,
+                dweightFallbackThreshold: orgSettings?.dweightFallbackThreshold,
+                gateMatchPattern: orgSettings?.gateMatchPattern,
                 ...overrideInputs // Apply overrides from simulation if any
             };
             const results = calculateRecommendedIndents(inputs);
