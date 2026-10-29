@@ -43,27 +43,33 @@ fi
 # re-applied, so new ones must keep that property.
 if compgen -G "deploy/migrations/*.sql" > /dev/null; then
   echo "==> Applying schema migrations"
-  # shellcheck disable=SC1091
-  set -a; . ./.env; set +a
-  for f in $(ls deploy/migrations/*.sql | sort); do
-    echo "    - $(basename "$f")"
-    mysql --host="${DB_HOST}" --port="${DB_PORT:-3306}" \
-          --user="${DB_USER}" --password="${DB_PASSWORD}" \
-          "${DB_NAME}" < "$f"
-  done
+  # Sourced inside a SUBSHELL on purpose. `set -a` exports everything in .env,
+  # including NODE_ENV=production — which makes the `npm ci` below skip
+  # devDependencies, so TypeScript disappears and the build dies on `npx tsc`.
+  # A subshell also keeps the database password out of the rest of the deploy.
+  (
+    # shellcheck disable=SC1091
+    set -a; . ./.env; set +a
+    for f in $(ls deploy/migrations/*.sql | sort); do
+      echo "    - $(basename "$f")"
+      mysql --host="${DB_HOST}" --port="${DB_PORT:-3306}" \
+            --user="${DB_USER}" --password="${DB_PASSWORD}" \
+            "${DB_NAME}" < "$f"
+    done
+  )
 fi
 
 # devDependencies are needed on the server: TypeScript builds the backend,
 # Vite + Tailwind build the frontend. This app is small, so that is fine.
 echo "==> Installing backend dependencies"
-npm ci
+npm ci --include=dev
 
 echo "==> Building backend (src -> dist)"
 npx tsc -p tsconfig.json
 
 echo "==> Installing + building frontend (frontend -> frontend/dist)"
 cd frontend
-npm ci
+npm ci --include=dev
 npm run build
 cd "${ROOT}"
 
