@@ -314,25 +314,40 @@ router.get('/ledger', requireAuth, async (req: AuthRequest, res) => {
   }
 });
 
+
 // ---------------------------------------------------------------------------
 // GET /api/feedback/scorecard?from=&to=
-// Who forecast the arriving cane better — the app or the plant team?
+// Whose indent would have met the requirement more closely?
 //
-// Both sides answer the SAME question: given the indent that was actually
-// placed, how much cane turns up? Each forecast is reduced to the yield it
-// implies and re-stated against the real order:
+// The requirement is an INPUT, not a prediction: the plant team says how much
+// cane the mill needs, and the app turns that into an order by dividing by the
+// yield it predicts. The plant team places their own order from their own
+// judgement. The next day's files tell us what they actually ordered and what
+// actually arrived.
 //
-//   app   yield = app_expected_arrival   / app_indent          (== ml_maturity)
-//   plant yield = plant_expected_arrival / plant_basis_indent
-//   predicted   = actual_indent * yield
+// So for each centre-day, with
+//   R = requirement        what was needed
+//   A = app_indent         what the app said to order
+//   P = actual_indent      what the plant team actually ordered
+//   V = actual_arrival     what actually turned up
 //
-// That step matters because the two sides may have assumed different order
-// sizes. Comparing their raw quintal figures would hand the win to whoever
-// happened to assume an order closer to the one finally placed, which is luck,
-// not forecasting.
+//   observed yield   y = V / P
+//   plant's result       V          miss = V - R
+//   app's result         A * y      miss = A * y - R
 //
-// Neither side is ever scored against the other, and neither is scored against
-// the order. The order is a decision; only the arrival is a fact.
+// Both are measured against the same target, the requirement, and both use the
+// SAME observed yield — so this compares the two ordering decisions and nothing
+// else. The day's weather, road and labour conditions are baked into y and
+// therefore cancel out.
+//
+// The honest unit is the DAY, not the centre. The mill needs a total tonnage;
+// splitting it between centres is the app's own choice, and grading the plant
+// team against an allocation they never agreed to would not be fair. Day totals
+// drive the verdict; the per-centre table is diagnostic only.
+//
+// Caveat, surfaced in the UI: this assumes the yield a centre achieved does not
+// depend on how much was ordered. Over a modest range that holds. If an order
+// were several times larger, it very likely would not.
 // ---------------------------------------------------------------------------
 router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
   try {
@@ -343,81 +358,128 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
       return res.status(400).json({ ok: false, error: 'from and to must be YYYY-MM-DD' });
     }
 
-    const appPred = '(actual_indent * (app_expected_arrival / app_indent))';
-    const plantPred = '(actual_indent * (plant_expected_arrival / plant_basis_indent))';
-
-    // Volume-weighted error, the same measure used to validate v1: total
-    // absolute gap divided by total actual volume. Averaging daily percentages
-    // would let near-zero days dominate.
-    //
-    // The signed bias sits beside it because the direction of a forecast error
-    // decides what the mill does about it: consistently expecting more cane
-    // than arrives means the yard runs short, which is a different problem from
-    // an error that averages out.
-    const metrics = `
-      COUNT(*)                                        AS cases,
-      SUM(actual_arrival)                             AS actual_volume,
-      SUM(actual_indent)                              AS indent_volume,
-      SUM(ABS(${appPred}   - actual_arrival))         AS app_abs_error,
-      SUM(ABS(${plantPred} - actual_arrival))         AS plant_abs_error,
-      SUM(${appPred}   - actual_arrival)              AS app_bias,
-      SUM(${plantPred} - actual_arrival)              AS plant_bias,
-      SUM(${appPred})                                 AS app_pred_volume,
-      SUM(${plantPred})                               AS plant_pred_volume,
-      SUM(CASE WHEN ABS(${appPred} - actual_arrival)
-                 < ABS(${plantPred} - actual_arrival) THEN 1 ELSE 0 END) AS app_wins,
-      SUM(CASE WHEN ABS(${plantPred} - actual_arrival)
-                 < ABS(${appPred}   - actual_arrival) THEN 1 ELSE 0 END) AS plant_wins`;
-
-    // Every denominator used above is forced positive here, so no row can
-    // contribute a NULL or a division by zero to the sums.
+    // Every denominator is forced positive, so no row can contribute a NULL or
+    // a division by zero to the sums.
     const scope = `
       FROM indent_ledger
      WHERE org_id = ? AND delivery_date BETWEEN ? AND ?
-       AND plant_expected_arrival IS NOT NULL
-       AND plant_basis_indent     > 0
-       AND app_expected_arrival   IS NOT NULL
-       AND app_indent             > 0
-       AND actual_indent          > 0
-       AND actual_arrival         IS NOT NULL
-       AND actual_arrival         > 0`;
+       AND requirement    > 0
+       AND app_indent     IS NOT NULL
+       AND actual_indent  > 0
+       AND actual_arrival IS NOT NULL`;
 
-    const [overall]: any = await pool.query(
-      `SELECT ${metrics} ${scope}`, [user.orgId, from, to]
+    // The app's counterfactual arrival, at the yield actually observed.
+    const appArrived = '(app_indent * (actual_arrival / actual_indent))';
+
+    const sums = `
+      SUM(requirement)      AS requirement,
+      SUM(actual_arrival)   AS arrived,
+      SUM(actual_indent)    AS ordered,
+      SUM(app_indent)       AS app_ordered,
+      SUM(${appArrived})    AS app_arrived,
+      COUNT(*)              AS centres`;
+
+    // ── Day totals: the unit the verdict rests on ──
+    const [byDayRaw]: any = await pool.query(
+      `SELECT delivery_date, ${sums} ${scope} GROUP BY delivery_date ORDER BY delivery_date DESC`,
+      [user.orgId, from, to]
     );
-    const [byCentre]: any = await pool.query(
-      `SELECT centre_id, centre_name, is_gate, ${metrics} ${scope}
+
+    const n = (v: any): number => (v === null || v === undefined ? 0 : Number(v));
+
+    const byDay = byDayRaw.map((d: any) => {
+      const requirement = n(d.requirement);
+      const arrived = n(d.arrived);
+      const appArrivedV = n(d.app_arrived);
+      const plantMiss = arrived - requirement;
+      const appMiss = appArrivedV - requirement;
+      return {
+        deliveryDate: d.delivery_date,
+        centres: n(d.centres),
+        requirement,
+        ordered: n(d.ordered),
+        appOrdered: n(d.app_ordered),
+        arrived,
+        appArrived: appArrivedV,
+        plantMiss,
+        appMiss,
+        // Strictly closer, so an exact tie counts for neither side.
+        winner:
+          Math.abs(appMiss) < Math.abs(plantMiss)
+            ? 'app'
+            : Math.abs(plantMiss) < Math.abs(appMiss)
+              ? 'plant'
+              : 'tie',
+      };
+    });
+
+    // ── Overall: volume-weighted across the period ──
+    // Summing the absolute DAY misses, not the centre-day misses, so a day that
+    // is short at one centre and long at another is judged on the net position
+    // the mill actually faced.
+    const totals = byDay.reduce(
+      (a: any, d: any) => ({
+        days: a.days + 1,
+        centres: a.centres + d.centres,
+        requirement: a.requirement + d.requirement,
+        ordered: a.ordered + d.ordered,
+        appOrdered: a.appOrdered + d.appOrdered,
+        arrived: a.arrived + d.arrived,
+        appArrived: a.appArrived + d.appArrived,
+        plantAbsError: a.plantAbsError + Math.abs(d.plantMiss),
+        appAbsError: a.appAbsError + Math.abs(d.appMiss),
+        plantBias: a.plantBias + d.plantMiss,
+        appBias: a.appBias + d.appMiss,
+        plantWins: a.plantWins + (d.winner === 'plant' ? 1 : 0),
+        appWins: a.appWins + (d.winner === 'app' ? 1 : 0),
+      }),
+      {
+        days: 0, centres: 0, requirement: 0, ordered: 0, appOrdered: 0, arrived: 0,
+        appArrived: 0, plantAbsError: 0, appAbsError: 0, plantBias: 0, appBias: 0,
+        plantWins: 0, appWins: 0,
+      }
+    );
+
+    // ── Per centre: diagnostic, with the allocation caveat attached in the UI ──
+    const [byCentreRaw]: any = await pool.query(
+      `SELECT centre_id, centre_name, is_gate, ${sums} ${scope}
         GROUP BY centre_id, centre_name, is_gate
-        ORDER BY cases DESC`, [user.orgId, from, to]
-    );
-    const [byReason]: any = await pool.query(
-      `SELECT reason_code, ${metrics} ${scope} AND reason_code IS NOT NULL
-        GROUP BY reason_code
-        ORDER BY cases DESC`, [user.orgId, from, to]
+        ORDER BY SUM(requirement) DESC`,
+      [user.orgId, from, to]
     );
 
-    // Coverage: how much of the period can be scored at all. A scorecard built
-    // on a handful of cases is not evidence, so the screen shows this beside
-    // the result. with_both is the count that actually drives the comparison.
+    const byCentre = byCentreRaw.map((c: any) => {
+      const requirement = n(c.requirement);
+      const arrived = n(c.arrived);
+      const appArrivedV = n(c.app_arrived);
+      return {
+        centreId: c.centre_id,
+        centreName: c.centre_name,
+        isGate: c.is_gate === 1,
+        centres: n(c.centres),
+        requirement,
+        ordered: n(c.ordered),
+        appOrdered: n(c.app_ordered),
+        arrived,
+        appArrived: appArrivedV,
+        plantMiss: arrived - requirement,
+        appMiss: appArrivedV - requirement,
+      };
+    });
+
+    // Coverage: how much of the period can be scored at all. A verdict built on
+    // a handful of days is not evidence, so the screen shows this beside it.
     const [coverage]: any = await pool.query(
-      `SELECT COUNT(*) AS total_rows,
-              SUM(plant_expected_arrival IS NOT NULL) AS with_plant,
-              SUM(actual_arrival IS NOT NULL)         AS with_arrival,
-              SUM(plant_expected_arrival IS NOT NULL
-                  AND actual_arrival IS NOT NULL
-                  AND actual_indent > 0)              AS with_both
+      `SELECT COUNT(DISTINCT delivery_date)                        AS total_days,
+              COUNT(*)                                             AS total_rows,
+              SUM(actual_indent IS NOT NULL AND actual_indent > 0) AS with_ordered,
+              SUM(actual_arrival IS NOT NULL)                      AS with_arrived
          FROM indent_ledger
         WHERE org_id = ? AND delivery_date BETWEEN ? AND ?`,
       [user.orgId, from, to]
     );
 
-    res.json({
-      ok: true,
-      overall: overall[0],
-      byCentre,
-      byReason,
-      coverage: coverage[0],
-    });
+    res.json({ ok: true, overall: totals, byDay, byCentre, coverage: coverage[0] });
   } catch (err) {
     console.error('GET /api/feedback/scorecard:', err);
     res.status(500).json({ ok: false, error: 'Failed to build scorecard' });

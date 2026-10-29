@@ -1,28 +1,39 @@
 /**
- * Version 2.1 — the variance and scorecard screen.
+ * Variance and scorecard.
  *
- * The contest is between two FORECASTS of the same thing: against the indent
- * that was actually placed, how much cane turned up? The app answers with its
- * predicted delivery rate; the plant team answers by hand. Both are scored
- * against the arrival.
+ * One question: whose indent would have met the requirement more closely?
  *
- * Neither side is scored against the other, and neither is scored against the
- * order. The order is the plant team's decision — scoring anyone on it would
- * just measure how well they remembered their own number.
+ * The requirement is an INPUT — the plant team says how much cane the mill
+ * needs, and the app turns that into an order by dividing by the yield it
+ * predicts. The plant team places their own order from their own judgement.
+ * The next day's files say what they actually ordered and what actually came.
  *
- * Because the two sides may have assumed different order sizes, every forecast
- * is re-stated against the order actually placed before being compared. Without
- * that step the win would go to whoever guessed the order size better, which is
- * not forecasting.
+ *   R = requirement      what was needed
+ *   A = app indent       what the app said to order
+ *   P = actual indent    what the plant team actually ordered
+ *   V = actual arrival   what turned up
+ *
+ *   observed yield  y = V / P
+ *   plant result        V        miss = V - R
+ *   app result          A * y    miss = A * y - R
+ *
+ * Both use the SAME observed yield, so the day's weather, roads and labour are
+ * baked into y and cancel out. What is left is the ordering decision, which is
+ * the only thing either side controls.
+ *
+ * The day is the unit of judgement, not the centre: the mill needs a total
+ * tonnage, and splitting it between centres is the app's own choice. Grading
+ * the plant team against an allocation they never agreed to would not be fair,
+ * so the per-centre table is diagnostic only and says so.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, RefreshCcw, AlertTriangle, Info } from 'lucide-react';
+import { BarChart3, RefreshCcw, AlertTriangle, Info, Target } from 'lucide-react';
 import { Header } from '../components/common/Header';
 import { useAuth } from '../context/AuthContext';
 import { addDays, formatDateGB } from '../services/dateUtils';
 import {
-    getLedger, getScorecard, getReasonCodes, accuracyPct, biasPct, yieldPct, n,
-    type LedgerRow, type Scorecard, type ScorecardGroup, type ReasonCode,
+    getScorecard, fulfilmentPct, biasPct, yieldPct,
+    type Scorecard, type ScorecardDay, type ScorecardCentre,
 } from '../services/feedbackService';
 import type { Page } from '../App';
 
@@ -31,68 +42,42 @@ interface Props {
     onLogout: () => void;
 }
 
-/** Enough cases for a comparison to mean anything. Below this we show the
- *  numbers but refuse to call a winner. */
-const MIN_CASES = 15;
+/** Enough days for a comparison to mean anything. Below this, no winner is named. */
+const MIN_DAYS = 10;
 
-const fmt = (v: number | null, dp = 0) =>
-    v === null || !Number.isFinite(v) ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: dp });
+const fmt = (v: number | null | undefined, dp = 0) =>
+    v === null || v === undefined || !Number.isFinite(v)
+        ? '—'
+        : v.toLocaleString(undefined, { maximumFractionDigits: dp });
 
-/**
- * A forecast re-stated against the order actually placed — the only footing on
- * which two forecasts of the same day can be compared.
- *
- * With no order recorded yet there is nothing to re-state onto, so the figure
- * is shown as given.
- */
-const restate = (expected: number | null, basis: number | null, placed: number | null): number | null => {
-    if (expected === null || basis === null || basis <= 0) return null;
-    if (placed === null || placed <= 0) return expected;
-    return expected * (placed / basis);
-};
+/** Signed quantity with an explicit sign, so short and over never look alike. */
+const fmtSigned = (v: number) =>
+    !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : ''}${Math.round(v).toLocaleString()}`;
 
 const Pct: React.FC<{ v: number | null; bold?: boolean }> = ({ v, bold }) => {
     if (v === null) return <span className="text-slate-300">—</span>;
-    const tone = v >= 85 ? 'text-green-700' : v >= 70 ? 'text-amber-700' : 'text-red-600';
+    const tone = v >= 90 ? 'text-green-700' : v >= 75 ? 'text-amber-700' : 'text-red-600';
     return <span className={`${tone} ${bold ? 'font-bold' : 'font-medium'}`}>{v.toFixed(1)}%</span>;
 };
 
 /**
- * Signed error. Positive means the forecast expected more cane than arrived,
- * which is the direction that empties a yard — worth distinguishing from an
- * error of the same size in the other direction.
+ * Which way the miss went. Short and over cost the mill very different things —
+ * a short day stops the crush, a long day piles cane in the yard to spoil — so
+ * the direction is named rather than folded into an absolute number.
  */
-const Bias: React.FC<{ v: number | null }> = ({ v }) => {
-    if (v === null) return null;
-    if (Math.abs(v) < 0.5) return <span className="text-slate-500">balanced</span>;
-    return v > 0
-        ? <span className="text-amber-700">expected {v.toFixed(1)}% too much</span>
-        : <span className="text-sky-700">expected {(-v).toFixed(1)}% too little</span>;
-};
-
-const Winner: React.FC<{ g: ScorecardGroup }> = ({ g }) => {
-    const app = accuracyPct(g.app_abs_error, g.actual_volume);
-    const plant = accuracyPct(g.plant_abs_error, g.actual_volume);
-    if (app === null || plant === null) return <span className="text-slate-300">—</span>;
-    if (g.cases < MIN_CASES) {
-        return <span className="text-slate-400 text-xs italic" title={`Only ${g.cases} cases — too few to call`}>
-            too few
-        </span>;
-    }
-    const gap = plant - app;
-    if (Math.abs(gap) < 1) return <span className="text-slate-500 text-xs">level</span>;
-    return gap > 0
-        ? <span className="text-emerald-700 font-semibold text-xs">plant +{gap.toFixed(1)}</span>
-        : <span className="text-indigo-700 font-semibold text-xs">app +{(-gap).toFixed(1)}</span>;
+const Direction: React.FC<{ pct: number | null }> = ({ pct }) => {
+    if (pct === null) return null;
+    if (Math.abs(pct) < 1) return <span className="text-slate-500">on target</span>;
+    return pct > 0
+        ? <span className="text-amber-700">{pct.toFixed(1)}% more cane than needed</span>
+        : <span className="text-red-600">{Math.abs(pct).toFixed(1)}% short of requirement</span>;
 };
 
 export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
     const { token } = useAuth();
 
     const [days, setDays] = useState(30);
-    const [rows, setRows] = useState<LedgerRow[]>([]);
     const [score, setScore] = useState<Scorecard | null>(null);
-    const [reasonCodes, setReasonCodes] = useState<ReasonCode[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -106,16 +91,9 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
         setLoading(true);
         setError(null);
         try {
-            const [l, s, c] = await Promise.all([
-                getLedger(token, from, to),
-                getScorecard(token, from, to),
-                getReasonCodes(token),
-            ]);
-            setRows(l.rows);
-            setScore(s);
-            setReasonCodes(c.reasonCodes);
+            setScore(await getScorecard(token, from, to));
         } catch (e: any) {
-            setError(e?.message || 'Could not load the feedback data');
+            setError(e?.message || 'Could not load the comparison');
         } finally {
             setLoading(false);
         }
@@ -123,33 +101,36 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
 
     useEffect(() => { load(); }, [load]);
 
-    const reasonLabel = useCallback(
-        (code: string | null) => reasonCodes.find(r => r.code === code)?.label ?? code ?? '',
-        [reasonCodes]);
-
     const o = score?.overall;
-    const appAcc = o ? accuracyPct(o.app_abs_error, o.actual_volume) : null;
-    const plantAcc = o ? accuracyPct(o.plant_abs_error, o.actual_volume) : null;
-    const appBias = o ? biasPct(o.app_bias, o.actual_volume) : null;
-    const plantBias = o ? biasPct(o.plant_bias, o.actual_volume) : null;
-    const actualYield = o ? yieldPct(o.actual_volume, o.indent_volume) : null;
-    const appYield = o ? yieldPct(o.app_pred_volume, o.indent_volume) : null;
-    const plantYield = o ? yieldPct(o.plant_pred_volume, o.indent_volume) : null;
-    const cases = o?.cases ?? 0;
+    const appAcc = o ? fulfilmentPct(o.appAbsError, o.requirement) : null;
+    const plantAcc = o ? fulfilmentPct(o.plantAbsError, o.requirement) : null;
+    const appBias = o ? biasPct(o.appBias, o.requirement) : null;
+    const plantBias = o ? biasPct(o.plantBias, o.requirement) : null;
+    const observedYield = o ? yieldPct(o.arrived, o.ordered) : null;
+    const scoredDays = o?.days ?? 0;
     const cov = score?.coverage;
+
+    const verdict = (() => {
+        if (!o || scoredDays < MIN_DAYS || appAcc === null || plantAcc === null) return null;
+        const gap = appAcc - plantAcc;
+        if (Math.abs(gap) < 1) return { tone: 'slate', text: 'Level so far — neither is consistently closer.' };
+        return gap > 0
+            ? { tone: 'indigo', text: `The app's order would have been ${gap.toFixed(1)} points closer to the requirement.` }
+            : { tone: 'emerald', text: `Your own order was ${Math.abs(gap).toFixed(1)} points closer to the requirement.` };
+    })();
 
     return (
         <div className="min-h-screen bg-slate-50">
             <Header pageTitle="Variance & Scorecard" onNavigate={onNavigate} onLogout={onLogout} />
             <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
-                <div className="flex flex-wrap justify-between items-center gap-3">
+                <div className="flex flex-wrap justify-between items-end gap-3">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                             <BarChart3 size={22} /> Variance &amp; Scorecard
                         </h1>
                         <p className="text-sm text-slate-500 mt-0.5">
-                            Against the cane that was ordered, how much actually arrived — and who called it closer.
+                            Whose indent would have met the requirement more closely — yours, or the app's.
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -180,210 +161,167 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
                     </div>
                 )}
 
-                {/* Scorecard */}
-                <div className="bg-white p-6 rounded-xl shadow-md">
-                    <h2 className="text-lg font-bold text-slate-900 mb-1">Who forecast the cane better?</h2>
-                    <p className="text-xs text-slate-500 mb-4">
-                        Both forecasts are re-stated against the indent that was actually placed, then measured
-                        against what arrived — never against each other, and never against the order. Volume-weighted,
-                        counting only centre-days where you gave your own figure.
-                    </p>
+                {/* How it is measured — stated on the page, not hidden in a tooltip. */}
+                <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 text-xs leading-relaxed">
+                    <Target size={15} className="mt-0.5 flex-shrink-0 text-slate-400" />
+                    <span>
+                        The <strong>requirement</strong> is the target both are measured against. You ordered
+                        a quantity and a quantity arrived — that is your result. The app's order is scored at
+                        the <strong>same delivery rate actually observed that day</strong>, so weather, roads
+                        and labour affect both sides equally and only the ordering decision is left.
+                        {' '}This assumes a centre's delivery rate does not change with the size of the order;
+                        over a normal range that holds, at extremes it would not.
+                    </span>
+                </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
-                        <div className="p-4 rounded-lg bg-indigo-50 border border-indigo-200">
-                            <div className="text-xs font-semibold text-indigo-800 uppercase tracking-wide">App forecast</div>
-                            <div className="text-3xl font-bold mt-1"><Pct v={appAcc} bold /></div>
-                            <div className="text-xs text-slate-500 mt-1"><Bias v={appBias} /></div>
-                            <div className="text-xs text-slate-400 mt-0.5">{o?.app_wins ?? 0} centre-days closer</div>
-                        </div>
+                {/* Headline */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
-                            <div className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">Your forecast</div>
+                            <div className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">Your order</div>
                             <div className="text-3xl font-bold mt-1"><Pct v={plantAcc} bold /></div>
-                            <div className="text-xs text-slate-500 mt-1"><Bias v={plantBias} /></div>
-                            <div className="text-xs text-slate-400 mt-0.5">{o?.plant_wins ?? 0} centre-days closer</div>
+                            <div className="text-xs text-slate-500 mt-1"><Direction pct={plantBias} /></div>
+                            <div className="text-xs text-slate-400 mt-0.5">{o?.plantWins ?? 0} day{(o?.plantWins ?? 0) === 1 ? '' : 's'} closer</div>
+                        </div>
+                        <div className="p-4 rounded-lg bg-indigo-50 border border-indigo-200">
+                            <div className="text-xs font-semibold text-indigo-800 uppercase tracking-wide">App's order</div>
+                            <div className="text-3xl font-bold mt-1"><Pct v={appAcc} bold /></div>
+                            <div className="text-xs text-slate-500 mt-1"><Direction pct={appBias} /></div>
+                            <div className="text-xs text-slate-400 mt-0.5">{o?.appWins ?? 0} day{(o?.appWins ?? 0) === 1 ? '' : 's'} closer</div>
                         </div>
                         <div className="p-4 rounded-lg bg-sky-50 border border-sky-200">
                             <div className="text-xs font-semibold text-sky-800 uppercase tracking-wide">Delivery rate</div>
                             <div className="text-3xl font-bold mt-1 text-sky-900">
-                                {actualYield === null ? '—' : `${actualYield.toFixed(1)}%`}
+                                {observedYield === null ? '—' : `${observedYield.toFixed(1)}%`}
                             </div>
-                            <div className="text-xs text-slate-500 mt-1">
-                                actually delivered of what was ordered
-                            </div>
+                            <div className="text-xs text-slate-500 mt-1">of ordered cane actually arrived</div>
                             <div className="text-xs text-slate-400 mt-0.5">
-                                app said {appYield === null ? '—' : `${appYield.toFixed(1)}%`}
-                                {' · '}you said {plantYield === null ? '—' : `${plantYield.toFixed(1)}%`}
+                                {fmt(o?.arrived)} of {fmt(o?.ordered)} qtl
                             </div>
                         </div>
                         <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
                             <div className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Evidence</div>
-                            <div className="text-3xl font-bold mt-1 text-slate-800">{cases}</div>
-                            <div className="text-xs text-slate-500 mt-1">centre-days compared</div>
+                            <div className="text-3xl font-bold mt-1 text-slate-800">{scoredDays}</div>
+                            <div className="text-xs text-slate-500 mt-1">day{scoredDays === 1 ? '' : 's'} compared</div>
                             {cov && (
                                 <div className="text-xs text-slate-400 mt-0.5">
-                                    {cov.with_plant}/{cov.total_rows} rows have your figure
-                                    {' · '}{cov.with_arrival} have arrivals
+                                    {cov.with_arrived} of {cov.total_rows} rows have arrivals
                                 </div>
                             )}
                         </div>
                     </div>
 
-                    {cases < MIN_CASES && (
-                        <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm">
+                    {verdict && (
+                        <div className={`mt-5 px-4 py-3 rounded-lg text-sm font-medium border
+                            ${verdict.tone === 'indigo' ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                              : verdict.tone === 'emerald' ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                              : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                            {verdict.text}
+                        </div>
+                    )}
+
+                    {scoredDays < MIN_DAYS && (
+                        <div className="flex items-start gap-2 mt-5 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm">
                             <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
                             <span>
-                                Only {cases} comparable centre-day{cases === 1 ? '' : 's'} so far. That is not yet
-                                evidence — treat these figures as a progress indicator, not a result. The proposal
-                                allows a month of collection before any weighting is changed.
+                                {scoredDays === 0
+                                    ? 'No day in this period has both an order and its arrivals yet. Rows appear here once the indent and purchase files for a delivery day have been uploaded.'
+                                    : `Only ${scoredDays} comparable day${scoredDays === 1 ? '' : 's'} so far. That is not evidence yet — treat it as a progress indicator, not a result.`}
                             </span>
                         </div>
                     )}
                 </div>
 
-                {/* By centre */}
+                {/* Day by day — the unit the verdict rests on */}
+                {score && score.byDay.length > 0 && (
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <h2 className="text-lg font-bold text-slate-900 mb-1">Day by day</h2>
+                        <p className="text-xs text-slate-500 mb-3">
+                            Each row is one delivery day, totalled across every centre. This is what the
+                            verdict above is built from.
+                        </p>
+                        <div className="overflow-auto max-h-[460px] border rounded-lg">
+                            <table className="w-full text-sm text-left">
+                                <thead className="text-xs text-slate-600 uppercase bg-slate-50 sticky top-0 border-b">
+                                    <tr>
+                                        <th className="px-3 py-2.5 font-semibold">Delivery</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold" title="Cane the mill needed">Required</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold" title="What you indented">You ordered</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold" title="What arrived against your order">Arrived</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold bg-emerald-50" title="Your result against the requirement">Your miss</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold" title="What the app recommended ordering">App order</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold bg-indigo-50" title="What the app's order would have brought, at the rate observed that day">App miss</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold">Closer</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {score.byDay.map((d: ScorecardDay) => (
+                                        <tr key={d.deliveryDate} className="border-b border-slate-100 hover:bg-slate-50">
+                                            <td className="px-3 py-2.5 whitespace-nowrap text-slate-600 font-medium">{formatDateGB(d.deliveryDate)}</td>
+                                            <td className="px-3 py-2.5 text-right font-semibold text-slate-800">{fmt(d.requirement)}</td>
+                                            <td className="px-3 py-2.5 text-right text-slate-600">{fmt(d.ordered)}</td>
+                                            <td className="px-3 py-2.5 text-right text-slate-600">{fmt(d.arrived)}</td>
+                                            <td className={`px-3 py-2.5 text-right font-semibold bg-emerald-50/50 ${d.plantMiss < 0 ? 'text-red-600' : 'text-amber-700'}`}>
+                                                {fmtSigned(d.plantMiss)}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right text-slate-600">{fmt(d.appOrdered)}</td>
+                                            <td className={`px-3 py-2.5 text-right font-semibold bg-indigo-50/50 ${d.appMiss < 0 ? 'text-red-600' : 'text-amber-700'}`}>
+                                                {fmtSigned(d.appMiss)}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right text-xs">
+                                                {d.winner === 'app' && <span className="text-indigo-700 font-semibold">app</span>}
+                                                {d.winner === 'plant' && <span className="text-emerald-700 font-semibold">you</span>}
+                                                {d.winner === 'tie' && <span className="text-slate-400">level</span>}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+
+                {/* Per centre — diagnostic only */}
                 {score && score.byCentre.length > 0 && (
-                    <div className="bg-white p-6 rounded-xl shadow-md">
-                        <h2 className="text-lg font-bold text-slate-900 mb-3">By centre</h2>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <h2 className="text-lg font-bold text-slate-900 mb-1">By centre</h2>
+                        <p className="text-xs text-slate-500 mb-3">
+                            Diagnostic, not a verdict. The per-centre requirement is the app's own split of
+                            the mill total, which you never agreed to — so a centre looking short here may
+                            simply mean the app allocated it differently, not that anyone ordered badly.
+                            Useful for spotting a centre that consistently under-delivers.
+                        </p>
                         <div className="overflow-auto max-h-[420px] border rounded-lg">
                             <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-slate-700 uppercase bg-slate-100 sticky top-0">
+                                <thead className="text-xs text-slate-600 uppercase bg-slate-50 sticky top-0 border-b">
                                     <tr>
-                                        <th className="px-4 py-2.5">Centre</th>
-                                        <th className="px-4 py-2.5 text-right">Cases</th>
-                                        <th className="px-4 py-2.5 text-right" title="Cane delivered as a share of cane ordered">Delivered</th>
-                                        <th className="px-4 py-2.5 text-right">App</th>
-                                        <th className="px-4 py-2.5 text-right">You</th>
-                                        <th className="px-4 py-2.5 text-right">Closer</th>
+                                        <th className="px-3 py-2.5 font-semibold">Centre</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold">Required</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold">Ordered</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold">Arrived</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold" title="Arrived as a share of ordered">Rate</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold bg-emerald-50">Your miss</th>
+                                        <th className="px-3 py-2.5 text-right font-semibold bg-indigo-50">App miss</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {score.byCentre.map((g) => (
-                                        <tr key={g.centre_id} className="border-b hover:bg-slate-50">
-                                            <td className="px-4 py-2.5 font-medium text-slate-800">
-                                                {g.centre_name || g.centre_id}
-                                                {g.is_gate === 1 && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold">GATE</span>}
-                                            </td>
-                                            <td className="px-4 py-2.5 text-right text-slate-500">{g.cases}</td>
-                                            <td className="px-4 py-2.5 text-right text-sky-800">
-                                                {(() => { const y = yieldPct(g.actual_volume, g.indent_volume); return y === null ? '—' : `${y.toFixed(0)}%`; })()}
-                                            </td>
-                                            <td className="px-4 py-2.5 text-right"><Pct v={accuracyPct(g.app_abs_error, g.actual_volume)} /></td>
-                                            <td className="px-4 py-2.5 text-right"><Pct v={accuracyPct(g.plant_abs_error, g.actual_volume)} /></td>
-                                            <td className="px-4 py-2.5 text-right"><Winner g={g} /></td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <p className="text-xs text-slate-400 mt-2">
-                            Centres where your forecast is consistently closer are the ones where your judgement
-                            should eventually carry weight in the model — but only once there are enough cases to
-                            be sure it is judgement and not chance.
-                        </p>
-                    </div>
-                )}
-
-                {/* By reason */}
-                {score && score.byReason.length > 0 && (
-                    <div className="bg-white p-6 rounded-xl shadow-md">
-                        <h2 className="text-lg font-bold text-slate-900 mb-1">Which reasons actually predict something?</h2>
-                        <p className="text-xs text-slate-500 mb-3">
-                            A reason that reliably goes with your forecast being closer is a candidate to become a
-                            model input. One that does not can be dropped from the list.
-                        </p>
-                        <div className="overflow-auto border rounded-lg">
-                            <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-slate-700 uppercase bg-slate-100">
-                                    <tr>
-                                        <th className="px-4 py-2.5">Reason given</th>
-                                        <th className="px-4 py-2.5 text-right">Times used</th>
-                                        <th className="px-4 py-2.5 text-right" title="Cane delivered as a share of cane ordered">Delivered</th>
-                                        <th className="px-4 py-2.5 text-right">App</th>
-                                        <th className="px-4 py-2.5 text-right">You</th>
-                                        <th className="px-4 py-2.5 text-right">Closer</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {score.byReason.map((g) => (
-                                        <tr key={g.reason_code} className="border-b hover:bg-slate-50">
-                                            <td className="px-4 py-2.5 font-medium text-slate-800">{reasonLabel(g.reason_code ?? null)}</td>
-                                            <td className="px-4 py-2.5 text-right text-slate-500">{g.cases}</td>
-                                            <td className="px-4 py-2.5 text-right text-sky-800">
-                                                {(() => { const y = yieldPct(g.actual_volume, g.indent_volume); return y === null ? '—' : `${y.toFixed(0)}%`; })()}
-                                            </td>
-                                            <td className="px-4 py-2.5 text-right"><Pct v={accuracyPct(g.app_abs_error, g.actual_volume)} /></td>
-                                            <td className="px-4 py-2.5 text-right"><Pct v={accuracyPct(g.plant_abs_error, g.actual_volume)} /></td>
-                                            <td className="px-4 py-2.5 text-right"><Winner g={g} /></td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-
-                {/* Row-by-row detail */}
-                <div className="bg-white p-6 rounded-xl shadow-md">
-                    <h2 className="text-lg font-bold text-slate-900 mb-1">Daily detail</h2>
-                    <p className="text-xs text-slate-500 mb-3">
-                        Both forecasts are shown scaled to the order actually placed, so they can be read straight
-                        against the arrival. Until an order is recorded they appear as they were entered.
-                    </p>
-                    {rows.length === 0 && !loading ? (
-                        <div className="flex items-start gap-2 px-4 py-4 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-sm">
-                            <Info size={16} className="mt-0.5 flex-shrink-0" />
-                            <span>
-                                Nothing recorded for this period yet. Rows appear here as soon as a calculation is run —
-                                the app's own numbers are saved automatically.
-                            </span>
-                        </div>
-                    ) : (
-                        <div className="overflow-auto max-h-[600px] border rounded-lg">
-                            <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-slate-700 uppercase bg-slate-100 sticky top-0">
-                                    <tr>
-                                        <th className="px-3 py-2.5">Delivery</th>
-                                        <th className="px-3 py-2.5">Centre</th>
-                                        <th className="px-3 py-2.5 text-right" title="Indent actually placed for this centre and day">Ordered</th>
-                                        <th className="px-3 py-2.5 text-right bg-indigo-50" title="Cane the app expected against that order">App expected</th>
-                                        <th className="px-3 py-2.5 text-right bg-emerald-50" title="Cane you expected against that order">You expected</th>
-                                        <th className="px-3 py-2.5 text-right" title="Cane that actually arrived against that order">Arrived</th>
-                                        <th className="px-3 py-2.5 text-right" title="Arrived as a share of ordered">Rate</th>
-                                        <th className="px-3 py-2.5 text-right">Closer</th>
-                                        <th className="px-3 py-2.5">Reason</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {rows.map((r) => {
-                                        const placed = n(r.actual_indent);
-                                        const arrived = n(r.actual_arrival);
-                                        const appExp = restate(n(r.app_expected_arrival), n(r.app_indent), placed);
-                                        const plantExp = restate(n(r.plant_expected_arrival), n(r.plant_basis_indent), placed);
-                                        const rate = placed && placed > 0 && arrived !== null
-                                            ? (arrived / placed) * 100 : null;
-                                        // Only callable once both forecasts and the arrival are known.
-                                        const closer = appExp !== null && plantExp !== null && arrived !== null
-                                            ? (Math.abs(appExp - arrived) < Math.abs(plantExp - arrived) ? 'app' : 'you')
-                                            : null;
+                                    {score.byCentre.map((c: ScorecardCentre) => {
+                                        const rate = yieldPct(c.arrived, c.ordered);
                                         return (
-                                            <tr key={`${r.delivery_date}-${r.centre_id}`} className="border-b hover:bg-slate-50">
-                                                <td className="px-3 py-2 whitespace-nowrap text-slate-500">{formatDateGB(r.delivery_date)}</td>
-                                                <td className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">
-                                                    {r.centre_name || r.centre_id}
-                                                    {r.is_gate === 1 && <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold">GATE</span>}
+                                            <tr key={c.centreId} className="border-b border-slate-100 hover:bg-slate-50">
+                                                <td className="px-3 py-2.5 font-medium text-slate-800">
+                                                    {c.centreName || c.centreId}
+                                                    {c.isGate && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold">GATE</span>}
                                                 </td>
-                                                <td className="px-3 py-2 text-right text-slate-600">{fmt(placed)}</td>
-                                                <td className="px-3 py-2 text-right bg-indigo-50/50 text-indigo-900">{fmt(appExp)}</td>
-                                                <td className="px-3 py-2 text-right bg-emerald-50/50 font-semibold text-emerald-900">{fmt(plantExp)}</td>
-                                                <td className="px-3 py-2 text-right font-semibold text-slate-800">{fmt(arrived)}</td>
-                                                <td className="px-3 py-2 text-right text-sky-800">{rate === null ? '—' : `${rate.toFixed(0)}%`}</td>
-                                                <td className="px-3 py-2 text-right text-xs">
-                                                    {closer === 'app' && <span className="text-indigo-700 font-semibold">app</span>}
-                                                    {closer === 'you' && <span className="text-emerald-700 font-semibold">you</span>}
+                                                <td className="px-3 py-2.5 text-right text-slate-700">{fmt(c.requirement)}</td>
+                                                <td className="px-3 py-2.5 text-right text-slate-600">{fmt(c.ordered)}</td>
+                                                <td className="px-3 py-2.5 text-right text-slate-600">{fmt(c.arrived)}</td>
+                                                <td className="px-3 py-2.5 text-right text-sky-800">{rate === null ? '—' : `${rate.toFixed(0)}%`}</td>
+                                                <td className={`px-3 py-2.5 text-right bg-emerald-50/50 ${c.plantMiss < 0 ? 'text-red-600' : 'text-amber-700'}`}>
+                                                    {fmtSigned(c.plantMiss)}
                                                 </td>
-                                                <td className="px-3 py-2 text-xs text-slate-500">
-                                                    {r.reason_code ? reasonLabel(r.reason_code) : ''}
-                                                    {r.reason_note && <span className="text-slate-400 italic"> — {r.reason_note}</span>}
+                                                <td className={`px-3 py-2.5 text-right bg-indigo-50/50 ${c.appMiss < 0 ? 'text-red-600' : 'text-amber-700'}`}>
+                                                    {fmtSigned(c.appMiss)}
                                                 </td>
                                             </tr>
                                         );
@@ -391,8 +329,19 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
                                 </tbody>
                             </table>
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
+
+                {score && score.byDay.length === 0 && !loading && (
+                    <div className="flex items-start gap-2 px-4 py-4 rounded-xl bg-white border border-slate-200 text-slate-600 text-sm">
+                        <Info size={16} className="mt-0.5 flex-shrink-0" />
+                        <span>
+                            Nothing to compare yet. A delivery day appears here once its indent and purchase
+                            files have been uploaded — normally three days after the order is placed. Nothing
+                            needs to be entered by hand.
+                        </span>
+                    </div>
+                )}
             </main>
         </div>
     );

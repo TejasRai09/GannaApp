@@ -23,6 +23,7 @@ interface DashboardProps {
     calculationHistory: CalculationRun[];
     infoMessage: string | null;
     seasonTotalDays: number;
+    orgSeasonStartDate?: string | null;
     seasonalCrushingCapacity: number;
     centerMapping: { [key: string]: string };
     handleFileUpdate: (key: DataType, setter: (data: StoredData<any> | null) => void, file: File) => void;
@@ -108,6 +109,7 @@ export const DashboardPage: React.FC<DashboardProps> = (props) => {
 
                     {calculationHistory.length > 0 && (
                         <ConsolidatedSummary
+                            orgSeasonStartDate={props.orgSeasonStartDate}
                             indentData={indentData}
                             purchaseData={purchaseData}
                             bondingData={bondingData}

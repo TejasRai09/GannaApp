@@ -13,6 +13,9 @@ interface ConsolidatedSummaryProps {
     calculationHistory: CalculationRun[];
     seasonTotalDays: number;
     seasonalCrushingCapacity: number;
+    /** The organisation's configured season start, YYYY-MM-DD. Used when a saved
+     *  calculation has none of its own, instead of guessing at 1 October. */
+    orgSeasonStartDate?: string | null;
 }
 
 // Helper to safely find values in loose CSV data (handles 'Code ', 'code', 'Center Name', etc.)
@@ -139,7 +142,7 @@ const SectionHeader: React.FC<{ title: string; icon: React.ReactNode }> = ({ tit
 );
 
 export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) => {
-    const { indentData, purchaseData, bondingData, calculationHistory, seasonTotalDays, seasonalCrushingCapacity } = props;
+    const { indentData, purchaseData, bondingData, calculationHistory, seasonTotalDays, seasonalCrushingCapacity, orgSeasonStartDate } = props;
     
     // Global Scope State
     const [selectedScope, setSelectedScope] = useState('all');
@@ -197,7 +200,14 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
             return d;
         };
         const currentDate = safeDate(latestCalc.inputs.currentDate, new Date());
-        const plantStartDate = safeDate(parseDate(latestCalc.inputs.plantStartDate), new Date(new Date().getFullYear(), 9, 1));
+        // Fall back to the organisation's configured season start before
+        // guessing. Guessing at 1 October is how this screen reported "Start:
+        // 01/10/2026" when the real season begins on the 30th.
+        const orgStart = orgSeasonStartDate ? new Date(orgSeasonStartDate) : null;
+        const seasonFallback = orgStart && !isNaN(orgStart.getTime()) && orgStart.getFullYear() >= 2000
+            ? orgStart
+            : new Date(new Date().getFullYear(), 9, 1);
+        const plantStartDate = safeDate(parseDate(latestCalc.inputs.plantStartDate), seasonFallback);
         
         if (latestCalc.results.effectiveRequirement) {
             setDailyTarget(Math.round(latestCalc.results.effectiveRequirement));
@@ -578,7 +588,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
             unifiedLifecycleData,
             scopeMetrics
         };
-    }, [indentData, purchaseData, bondingData, calculationHistory, seasonTotalDays, seasonalCrushingCapacity, dailyTarget, selectedScope]);
+    }, [indentData, purchaseData, bondingData, calculationHistory, seasonTotalDays, seasonalCrushingCapacity, orgSeasonStartDate, dailyTarget, selectedScope]);
 
     // --- Filter Logic ---
     const filterDataByRange = (data: any[], range: string, currentDate: Date | undefined, seasonStart: Date | undefined, extendForwardDays: number = 0) => {

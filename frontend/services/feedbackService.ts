@@ -48,37 +48,70 @@ export interface LedgerRow {
   week_of_season: number | null;
 }
 
-export interface ScorecardGroup {
-  cases: number;
-  /** Cane that actually arrived — what both forecasts are measured against. */
-  actual_volume: string | null;
-  /** Cane that was actually ordered — the basis both forecasts are re-stated on. */
-  indent_volume: string | null;
-  app_abs_error: string | null;
-  plant_abs_error: string | null;
-  /** Signed error: positive means the forecast expected more cane than arrived. */
-  app_bias: string | null;
-  plant_bias: string | null;
-  app_pred_volume: string | null;
-  plant_pred_volume: string | null;
-  app_wins: number;
-  plant_wins: number;
-  centre_id?: string;
-  centre_name?: string;
-  is_gate?: 0 | 1;
-  reason_code?: string;
+/**
+ * One delivery day, both ordering decisions measured against the requirement.
+ *
+ *   requirement  what the mill needed
+ *   ordered      what the plant team actually indented
+ *   arrived      what actually turned up against that order
+ *   appOrdered   what the app said to order
+ *   appArrived   what the app's order WOULD have brought, at the yield
+ *                actually observed that day
+ */
+export interface ScorecardDay {
+  deliveryDate: string;
+  centres: number;
+  requirement: number;
+  ordered: number;
+  appOrdered: number;
+  arrived: number;
+  appArrived: number;
+  /** Signed: positive means more cane than needed, negative means short. */
+  plantMiss: number;
+  appMiss: number;
+  winner: 'app' | 'plant' | 'tie';
+}
+
+export interface ScorecardCentre {
+  centreId: string;
+  centreName: string | null;
+  isGate: boolean;
+  centres: number;
+  requirement: number;
+  ordered: number;
+  appOrdered: number;
+  arrived: number;
+  appArrived: number;
+  plantMiss: number;
+  appMiss: number;
+}
+
+export interface ScorecardTotals {
+  days: number;
+  centres: number;
+  requirement: number;
+  ordered: number;
+  appOrdered: number;
+  arrived: number;
+  appArrived: number;
+  plantAbsError: number;
+  appAbsError: number;
+  /** Signed, summed over days: the direction the mill was wrong in. */
+  plantBias: number;
+  appBias: number;
+  plantWins: number;
+  appWins: number;
 }
 
 export interface Scorecard {
-  overall: ScorecardGroup;
-  byCentre: ScorecardGroup[];
-  byReason: ScorecardGroup[];
+  overall: ScorecardTotals;
+  byDay: ScorecardDay[];
+  byCentre: ScorecardCentre[];
   coverage: {
+    total_days: number;
     total_rows: number;
-    with_plant: number;
-    with_arrival: number;
-    /** Rows that can actually be scored — the number the verdict rests on. */
-    with_both: number;
+    with_ordered: number;
+    with_arrived: number;
   };
 }
 
@@ -302,29 +335,21 @@ export const getScorecard = (token: string, from: Date, to: Date) =>
   );
 
 /**
- * Volume-weighted accuracy, the same measure used to validate v1: total
- * absolute gap over total actual volume. Averaging daily percentages would let
- * near-zero days dominate the result.
+ * Volume-weighted accuracy: total absolute miss as a share of total
+ * requirement, subtracted from 100. The same measure used to validate v1.
+ * Averaging daily percentages would let a near-zero day dominate.
  */
-export const accuracyPct = (absError: string | null, volume: string | null): number | null => {
-  const e = n(absError), v = n(volume);
-  if (e === null || v === null || v <= 0) return null;
-  return 100 - (e / v) * 100;
-};
+export const fulfilmentPct = (absError: number, requirement: number): number | null =>
+  requirement > 0 ? 100 - (absError / requirement) * 100 : null;
 
 /**
- * Signed error as a share of the cane that arrived. Positive means the forecast
- * expected more cane than turned up, which is the direction that empties a yard.
+ * Signed miss as a share of requirement. Positive means more cane arrived than
+ * was needed — the yard builds up. Negative means the mill ran short. The two
+ * cost very different things, so the direction is reported, not just the size.
  */
-export const biasPct = (bias: string | null, volume: string | null): number | null => {
-  const b = n(bias), v = n(volume);
-  if (b === null || v === null || v <= 0) return null;
-  return (b / v) * 100;
-};
+export const biasPct = (bias: number, requirement: number): number | null =>
+  requirement > 0 ? (bias / requirement) * 100 : null;
 
-/** Delivered share of an order, as a percentage. */
-export const yieldPct = (arrived: string | null, ordered: string | null): number | null => {
-  const a = n(arrived), o = n(ordered);
-  if (a === null || o === null || o <= 0) return null;
-  return (a / o) * 100;
-};
+/** Delivered share of what was ordered. */
+export const yieldPct = (arrived: number, ordered: number): number | null =>
+  ordered > 0 ? (arrived / ordered) * 100 : null;

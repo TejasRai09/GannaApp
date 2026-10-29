@@ -1,29 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CalculationResults } from '../types';
-import { ClipboardList, Download, Sparkles, Users } from 'lucide-react';
+import { ClipboardList, Download, Sparkles } from 'lucide-react';
 import { exportToCsv } from '../services/exportService';
 import { useAuth } from '../context/AuthContext';
 import { addDays } from '../services/dateUtils';
-import {
-    getReasonCodes, savePredictions, savePlantExpectation, getLedger, n,
-    appExpectedArrival, type ReasonCode,
-} from '../services/feedbackService';
-import { PlantInputCell, needsReason, basisFor, type SaveState } from './PlantInputColumn';
+import { savePredictions } from '../services/feedbackService';
 
 interface IndentTableProps {
     results: CalculationResults;
     calculationName: string;
     /** The run date. Delivery is T+3, which is what the feedback ledger is keyed by. */
     currentDate?: Date;
-}
-
-interface PlantEntry {
-    /** Cane the plant team expects to arrive, in quintals. */
-    value: number | null;
-    /** The order that expectation assumes; null means the app's recommendation. */
-    basisIndent: number | null;
-    reasonCode: string | null;
-    reasonNote: string | null;
 }
 
 const PHASE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
@@ -46,20 +33,19 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
     const totalExcelIndent   = tableData.reduce((sum, row) => sum + row.dWeightIndent, 0);
     const totalBonding       = tableData.reduce((sum, row) => sum + row.bonding, 0);
 
-    // ── v2 feedback loop ────────────────────────────────────────────────────
-    const deliveryDate  = currentDate ? addDays(currentDate, 3) : null;
-    const feedbackOn    = Boolean(token && deliveryDate);
-
-    const [reasonCodes, setReasonCodes] = useState<ReasonCode[]>([]);
-    const [plant, setPlant]             = useState<Record<string, PlantEntry>>({});
-    const [saveStates, setSaveStates]   = useState<Record<string, SaveState>>({});
-    const [ledgerReady, setLedgerReady] = useState(false);
-    const [loadError, setLoadError]     = useState<string | null>(null);
-    // Guards against re-saving predictions on every re-render of the same run.
+    // ── Recording, for the next-day comparison ───────────────────────────
+    // The app's requirement and recommendation are saved the moment a run is
+    // shown. Nothing is typed in here: what the plant team actually indented
+    // and what actually arrived both come from the next day's uploaded files,
+    // which is what makes the comparison free.
+    const deliveryDate = currentDate ? addDays(currentDate, 3) : null;
+    const recordingOn  = Boolean(token && deliveryDate);
+    const [recordError, setRecordError] = useState<string | null>(null);
+    // Guards against re-saving on every re-render of the same run.
     const savedForDate = useRef<string | null>(null);
 
     useEffect(() => {
-        if (!feedbackOn || !token || !deliveryDate) return;
+        if (!recordingOn || !token || !deliveryDate) return;
         const key = deliveryDate.toDateString();
         if (savedForDate.current === key) return;
         savedForDate.current = key;
@@ -69,85 +55,17 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
             try {
                 const isGateMap = new Map<string, boolean>(
                     tableData.map(r => [r.centreId, r.isGate ?? false] as [string, boolean]));
-                // The app's row must exist before a plant number can attach to it.
                 await savePredictions(token, deliveryDate, tableData, isGateMap);
-                const [codes, ledger] = await Promise.all([
-                    getReasonCodes(token),
-                    getLedger(token, deliveryDate, deliveryDate),
-                ]);
-                if (cancelled) return;
-                setReasonCodes(codes.reasonCodes);
-                const existing: Record<string, PlantEntry> = {};
-                for (const r of ledger.rows) {
-                    if (r.plant_expected_arrival !== null) {
-                        existing[r.centre_id] = {
-                            value: n(r.plant_expected_arrival),
-                            basisIndent: n(r.plant_indent),
-                            reasonCode: r.reason_code,
-                            reasonNote: r.reason_note,
-                        };
-                    }
-                }
-                setPlant(existing);
-                setLedgerReady(true);
-                setLoadError(null);
+                if (!cancelled) setRecordError(null);
             } catch (e: any) {
                 if (cancelled) return;
-                // The recommendation itself must still be usable if this fails.
+                // The recommendation itself must stay usable if recording fails.
                 savedForDate.current = null;
-                setLoadError(e?.message || 'Could not reach the feedback service');
+                setRecordError(e?.message || 'Could not reach the recording service');
             }
         })();
         return () => { cancelled = true; };
-    }, [feedbackOn, token, deliveryDate?.getTime(), tableData]);
-
-    const handlePlantChange = useCallback(
-        (
-            centreId: string,
-            value: number | null,
-            basisIndent: number | null,
-            reasonCode: string | null,
-            reasonNote: string | null,
-        ) => {
-            setPlant(prev => ({ ...prev, [centreId]: { value, basisIndent, reasonCode, reasonNote } }));
-
-            if (!token || !deliveryDate) return;
-            const row = tableData.find(r => r.centreId === centreId);
-            if (!row) return;
-
-            // A forecast that still needs a reason is held locally until one is
-            // picked, so half-finished entries never reach the ledger.
-            const appExpected = appExpectedArrival(row);
-            if (value !== null && needsReason(value, basisIndent, row.indentToRaise, appExpected) && !reasonCode) return;
-
-            // A forecast without a positive order behind it cannot be turned
-            // into a yield, so there is nothing comparable to store yet. This
-            // only arises where the app recommends nothing and the plant team
-            // still expects cane; the cell asks them for the order in that case.
-            const basis = basisFor(basisIndent, row.indentToRaise);
-            if (value !== null && basis <= 0) return;
-
-            setSaveStates(s => ({ ...s, [centreId]: 'saving' }));
-            savePlantExpectation(
-                token, deliveryDate, centreId,
-                value,
-                value === null ? null : basis,
-                basisIndent,
-                reasonCode, reasonNote, true,
-            )
-                .then(() => setSaveStates(s => ({ ...s, [centreId]: 'saved' })))
-                .catch(() => setSaveStates(s => ({ ...s, [centreId]: 'error' })));
-        },
-        [token, deliveryDate?.getTime(), tableData],
-    );
-
-    const enteredCount = Object.values(plant).filter((p: PlantEntry) => p.value !== null).length;
-    // Total cane expected: the plant team's figure where they gave one, the
-    // app's where they did not. This is an ARRIVAL total, not an order total.
-    const totalExpected = tableData.reduce(
-        (sum, r) => sum + (plant[r.centreId]?.value ?? appExpectedArrival(r) ?? 0), 0);
-    const totalAppExpected = tableData.reduce(
-        (sum, r) => sum + (appExpectedArrival(r) ?? 0), 0);
+    }, [recordingOn, token, deliveryDate?.getTime(), tableData]);
 
     const hasBands       = tableData.some(r => r.bandLow !== undefined);
     const hasMl          = tableData.some(r => r.mlMaturity !== undefined);
@@ -229,52 +147,23 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
                 </div>
             )}
 
-            {/* v2 feedback loop banner */}
-            {feedbackOn && (
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 px-4 py-2.5 rounded-lg border text-sm bg-emerald-50 border-emerald-200">
-                    <span className="font-semibold text-emerald-800 flex items-center gap-1.5">
-                        <Users size={15} /> Your call
+            {/* Recording note. Quiet by design: there is nothing to do here. */}
+            {recordingOn && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3 px-4 py-2.5 rounded-lg border text-sm bg-slate-50 border-slate-200">
+                    <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                        <ClipboardList size={15} /> Recorded for tomorrow's comparison
                     </span>
                     <span className="text-slate-500 text-xs">
-                        The order is your decision either way. What we compare is the <strong>forecast</strong>:
-                        against the indent below, how much cane do you expect to actually come in? Fill
-                        in <strong>You expect</strong> only where you expect something different from the app —
-                        blank means you agree. Over a 10% gap we ask why, because the reason is what teaches
-                        the model something it cannot see in the cane data.
+                        The requirement and this recommendation are saved against{' '}
+                        {deliveryDate ? deliveryDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'the delivery day'}.
+                        When that day's indent and purchase files are uploaded, the Variance screen shows
+                        whether your order or this one would have met the requirement more closely.
+                        Nothing to fill in.
                     </span>
-                    <span className="text-emerald-700 font-medium text-xs whitespace-nowrap">
-                        {enteredCount === 0
-                            ? 'No forecast entered'
-                            : `${enteredCount} centre${enteredCount === 1 ? '' : 's'} differ`}
-                    </span>
-                    {loadError && (
+                    {recordError && (
                         <span className="text-amber-700 font-medium text-xs">
-                            Input unavailable: {loadError}. The recommendation above is unaffected.
+                            Not recorded: {recordError}. The recommendation above is unaffected.
                         </span>
-                    )}
-                </div>
-            )}
-
-            {/* Season phase banner — historical band context (reference only) */}
-            {hasBands && phaseStyle && (
-                <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 px-4 py-2 rounded-lg border text-sm ${phaseStyle.bg}`}>
-                    <span className={`font-semibold ${phaseStyle.text}`}>
-                        {phaseStyle.label}
-                        {weekOfSeason !== undefined && <span className="font-normal ml-1">(Week {weekOfSeason})</span>}
-                    </span>
-                    {overallBandLo !== undefined && (
-                        <>
-                            <span className="text-slate-400">|</span>
-                            <span className="text-slate-500 text-xs">Historical mill band (reference):</span>
-                            <span className="text-slate-600">{overallBandLo.toLocaleString()} – {overallBandHigh?.toLocaleString()} qtl</span>
-                            <span className="text-slate-600">(typical {overallBandMid?.toLocaleString()})</span>
-                            <span className={`font-medium ${
-                                overallStatus === 'within' ? 'text-green-700' :
-                                overallStatus === 'above'  ? 'text-amber-700' : 'text-slate-600'
-                            }`}>
-                                — today's total {totalIndentToRaise.toLocaleString(undefined, { maximumFractionDigits: 0 })} qtl is {overallStatus} range
-                            </span>
-                        </>
                     )}
                 </div>
             )}
@@ -292,17 +181,10 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
                             {hasBands && <th scope="col" className="px-4 py-3 text-right bg-slate-100 text-slate-400 text-xs font-normal" title="Historical range for this centre in this season week — reference only, does not change the numbers">Band High</th>}
                             <th scope="col" className="px-6 py-3 text-right bg-slate-100" title="The classical spreadsheet formula reproduced exactly: computed per centre WITHOUT the centre mapping (as Excel does), then summed for merged rows like GATE">Excel Model</th>
                             <th scope="col"
-                                className={`px-6 py-3 text-right bg-[#eef2ff] text-[#312e81] font-bold z-20 ${feedbackOn ? 'sticky right-[180px] shadow-none' : 'sticky right-0 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]'}`}
+                                className="px-6 py-3 text-right bg-[#eef2ff] text-[#312e81] font-bold z-20 sticky right-0 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]"
                                 title="Recommended order: centre requirement (by real 14-day throughput share) ÷ predicted delivery rate. Hover a value for its breakdown.">
                                 ML Recommended
                             </th>
-                            {feedbackOn && (
-                                <th scope="col"
-                                    className="px-4 py-3 text-right bg-emerald-50 text-emerald-900 font-bold sticky right-0 z-20 w-[180px] shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]"
-                                    title="How much cane you expect to actually arrive against the indent to its left. Leave blank where you agree with the app's expectation. This is a forecast, not an order — the order stays your decision.">
-                                    You expect (Qtls)
-                                </th>
-                            )}
                         </tr>
                     </thead>
                     <tbody>
@@ -332,7 +214,7 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
                                         {row.dWeightIndent.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
                                     <td
-                                        className={`px-6 py-4 text-right font-bold text-lg text-[#312e81] bg-[#eef2ff] z-10 ${feedbackOn ? 'sticky right-[180px]' : 'sticky right-0 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]'}`}
+                                        className="px-6 py-4 text-right font-bold text-lg text-[#312e81] bg-[#eef2ff] z-10 sticky right-0 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]"
                                         title={row.mlMaturity !== undefined
                                             ? `Expected delivery rate: ${(row.mlMaturity * 100).toFixed(1)}% of what is ordered`
                                               + (row.mlAdjusted !== undefined ? ` | Centre requirement (14-day throughput share): ${row.mlAdjusted.toFixed(0)} qtl` : '')
@@ -346,23 +228,6 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
                                             {row.indentToRaise.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </div>
                                     </td>
-                                    {feedbackOn && (
-                                        <td className="px-4 py-4 bg-emerald-50 sticky right-0 z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]">
-                                            <PlantInputCell
-                                                centreId={row.centreId}
-                                                appIndent={row.indentToRaise}
-                                                appExpected={appExpectedArrival(row)}
-                                                value={plant[row.centreId]?.value ?? null}
-                                                basisIndent={plant[row.centreId]?.basisIndent ?? null}
-                                                reasonCode={plant[row.centreId]?.reasonCode ?? null}
-                                                reasonNote={plant[row.centreId]?.reasonNote ?? null}
-                                                reasonCodes={reasonCodes}
-                                                saveState={saveStates[row.centreId] ?? 'idle'}
-                                                disabled={!ledgerReady}
-                                                onChange={handlePlantChange}
-                                            />
-                                        </td>
-                                    )}
                                 </tr>
                             );
                         })}
@@ -376,22 +241,9 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
                             <td className="px-6 py-4 text-right bg-slate-100 text-slate-600">
                                 {totalExcelIndent.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
-                            <td className={`px-6 py-4 text-right bg-[#eef2ff] text-[#312e81] text-lg z-20 ${feedbackOn ? 'sticky right-[180px]' : 'sticky right-0 rounded-br-lg shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]'}`}>
+                            <td className="px-6 py-4 text-right bg-[#eef2ff] text-[#312e81] text-lg z-20 sticky right-0 rounded-br-lg shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]">
                                 {totalIndentToRaise.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
-                            {feedbackOn && (
-                                <td className="px-4 py-4 text-right bg-emerald-50 text-emerald-900 text-lg rounded-br-lg sticky right-0 z-20 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]"
-                                    title={`Total cane expected to arrive: your figures where entered, the app's where left blank. The app alone expects ${totalAppExpected.toLocaleString(undefined, { maximumFractionDigits: 0 })} qtl.`}>
-                                    <div className="flex flex-col items-end leading-tight">
-                                        <span>{totalExpected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                                        {Math.round(totalExpected) !== Math.round(totalAppExpected) && (
-                                            <span className="text-[10px] font-medium text-slate-500">
-                                                app: {totalAppExpected.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                            </span>
-                                        )}
-                                    </div>
-                                </td>
-                            )}
                         </tr>
                     </tfoot>
                 </table>
