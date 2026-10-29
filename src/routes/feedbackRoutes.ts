@@ -49,7 +49,13 @@ router.get('/reason-codes', requireAuth, (_req, res) => {
 // POST /api/feedback/predictions
 // Called after a calculation run. Upserts one row per centre for that delivery
 // date. Deliberately touches ONLY the app columns — a re-run must never wipe a
-// plant-team number or an outcome already recorded against that day.
+// plant-team entry or an outcome already recorded against that day.
+//
+// app_expected_arrival is the forecast that actually gets scored: the cane the
+// app expects to receive against its own recommendation. The client sends it
+// rather than letting this route derive it, because in late-season wind-down
+// mode the recommendation no longer equals requirement / maturity, so the
+// identity app_indent * ml_maturity == requirement stops holding.
 //
 // Body: { deliveryDate: 'YYYY-MM-DD', runId?: number, rows: [...] }
 // ---------------------------------------------------------------------------
@@ -68,21 +74,30 @@ router.post('/predictions', requireAuth, async (req: AuthRequest, res) => {
       return res.status(400).json({ ok: false, error: 'too many rows (max 500)' });
     }
 
-    const values = rows.map((r: any) => [
-      user.orgId,
-      deliveryDate,
-      String(r.centreId ?? '').slice(0, 32),
-      r.centreName ? String(r.centreName).slice(0, 255) : null,
-      r.isGate ? 1 : 0,
-      num(r.appIndent),
-      num(r.excelIndent),
-      num(r.requirement),
-      num(r.forecastT3),
-      num(r.d1Weight),
-      num(r.mlMaturity),
-      num(r.weekOfSeason),
-      num(runId),
-    ]);
+    const values = rows.map((r: any) => {
+      const appIndent = num(r.appIndent);
+      const maturity = num(r.mlMaturity);
+      // Fall back to the identity only when the client did not send a forecast,
+      // so an older client still populates the column that gets scored.
+      const expected = num(r.appExpectedArrival)
+        ?? (appIndent !== null && maturity !== null ? appIndent * maturity : null);
+      return [
+        user.orgId,
+        deliveryDate,
+        String(r.centreId ?? '').slice(0, 32),
+        r.centreName ? String(r.centreName).slice(0, 255) : null,
+        r.isGate ? 1 : 0,
+        appIndent,
+        expected,
+        num(r.excelIndent),
+        num(r.requirement),
+        num(r.forecastT3),
+        num(r.d1Weight),
+        maturity,
+        num(r.weekOfSeason),
+        num(runId),
+      ];
+    });
 
     if (values.some((v) => !v[2])) {
       return res.status(400).json({ ok: false, error: 'every row needs a centreId' });
@@ -91,20 +106,21 @@ router.post('/predictions', requireAuth, async (req: AuthRequest, res) => {
     await pool.query(
       `INSERT INTO indent_ledger
          (org_id, delivery_date, centre_id, centre_name, is_gate,
-          app_indent, excel_indent, requirement, forecast_t3,
+          app_indent, app_expected_arrival, excel_indent, requirement, forecast_t3,
           d1_weight, ml_maturity, week_of_season, run_id)
        VALUES ?
        ON DUPLICATE KEY UPDATE
-         centre_name    = VALUES(centre_name),
-         is_gate        = VALUES(is_gate),
-         app_indent     = VALUES(app_indent),
-         excel_indent   = VALUES(excel_indent),
-         requirement    = VALUES(requirement),
-         forecast_t3    = VALUES(forecast_t3),
-         d1_weight      = VALUES(d1_weight),
-         ml_maturity    = VALUES(ml_maturity),
-         week_of_season = VALUES(week_of_season),
-         run_id         = VALUES(run_id)`,
+         centre_name          = VALUES(centre_name),
+         is_gate              = VALUES(is_gate),
+         app_indent           = VALUES(app_indent),
+         app_expected_arrival = VALUES(app_expected_arrival),
+         excel_indent         = VALUES(excel_indent),
+         requirement          = VALUES(requirement),
+         forecast_t3          = VALUES(forecast_t3),
+         d1_weight            = VALUES(d1_weight),
+         ml_maturity          = VALUES(ml_maturity),
+         week_of_season       = VALUES(week_of_season),
+         run_id               = VALUES(run_id)`,
       [values]
     );
 
@@ -117,14 +133,22 @@ router.post('/predictions', requireAuth, async (req: AuthRequest, res) => {
 
 // ---------------------------------------------------------------------------
 // PUT /api/feedback/plant
-// The plant team's own number for one centre on one delivery day.
-// Sending plantIndent: null clears the entry (they changed their mind and now
-// agree with the app).
+// The plant team's forecast for one centre on one delivery day: how much cane
+// they expect to actually receive, and the order that expectation assumes.
+//
+// basisIndent is stored rather than defaulted at read time on purpose. It is
+// frozen at the moment the number is typed, so a later re-run that moves the
+// app's recommendation cannot silently rewrite the yield the plant team meant.
+//
+// Sending plantExpectedArrival: null clears the whole entry.
 // ---------------------------------------------------------------------------
 router.put('/plant', requireAuth, async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
-    const { deliveryDate, centreId, plantIndent, reasonCode, reasonNote, sawRecommendation } = req.body;
+    const {
+      deliveryDate, centreId, plantExpectedArrival, basisIndent, plantIndent,
+      reasonCode, reasonNote, sawRecommendation,
+    } = req.body;
 
     if (!isIsoDate(deliveryDate)) {
       return res.status(400).json({ ok: false, error: 'deliveryDate must be YYYY-MM-DD' });
@@ -133,33 +157,53 @@ router.put('/plant', requireAuth, async (req: AuthRequest, res) => {
       return res.status(400).json({ ok: false, error: 'centreId is required' });
     }
 
-    const qty = num(plantIndent);
-    if (qty !== null && qty < 0) {
+    const expected = num(plantExpectedArrival);
+    const basis = num(basisIndent);
+    const ordering = num(plantIndent);
+
+    if (expected !== null && expected < 0) {
+      return res.status(400).json({ ok: false, error: 'plantExpectedArrival cannot be negative' });
+    }
+    if (ordering !== null && ordering < 0) {
       return res.status(400).json({ ok: false, error: 'plantIndent cannot be negative' });
+    }
+    // Without a positive basis the expectation cannot be turned into a yield,
+    // and yield is the only unit in which the two forecasts are comparable.
+    if (expected !== null && (basis === null || basis <= 0)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'basisIndent must be a positive number when plantExpectedArrival is given',
+      });
     }
     if (reasonCode && !VALID_CODES.has(reasonCode)) {
       return res.status(400).json({ ok: false, error: `unknown reasonCode: ${reasonCode}` });
     }
 
-    // Clearing the number clears the reason with it, so a stale reason cannot
-    // outlive the disagreement it explained.
-    const clearing = qty === null;
+    // Clearing the forecast clears everything attached to it, so a stale reason
+    // or basis cannot outlive the disagreement it explained.
+    const clearing = expected === null;
 
     const [result]: any = await pool.query(
       `UPDATE indent_ledger
-          SET plant_indent       = ?,
-              reason_code        = ?,
-              reason_note        = ?,
-              plant_user_id      = ?,
-              saw_recommendation = ?,
-              plant_entered_at   = ?
+          SET plant_expected_arrival = ?,
+              plant_basis_indent     = ?,
+              plant_indent           = ?,
+              reason_code            = ?,
+              reason_note            = ?,
+              plant_user_id          = ?,
+              saw_recommendation     = ?,
+              plant_entered_at       = ?,
+              expectation_entered_at = ?
         WHERE org_id = ? AND delivery_date = ? AND centre_id = ?`,
       [
-        qty,
+        expected,
+        clearing ? null : basis,
+        clearing ? null : ordering,
         clearing ? null : (reasonCode || null),
         clearing ? null : (reasonNote ? String(reasonNote).slice(0, 500) : null),
         clearing ? null : user.id,
         clearing ? null : (sawRecommendation ? 1 : 0),
+        clearing ? null : new Date(),
         clearing ? null : new Date(),
         user.orgId, deliveryDate, centreId,
       ]
@@ -172,7 +216,7 @@ router.put('/plant', requireAuth, async (req: AuthRequest, res) => {
       });
     }
 
-    res.json({ ok: true, deliveryDate, centreId, plantIndent: qty });
+    res.json({ ok: true, deliveryDate, centreId, plantExpectedArrival: expected });
   } catch (err) {
     console.error('PUT /api/feedback/plant:', err);
     res.status(500).json({ ok: false, error: 'Failed to save plant team input' });
@@ -232,7 +276,7 @@ router.post('/outcomes', requireAuth, async (req: AuthRequest, res) => {
 
 // ---------------------------------------------------------------------------
 // GET /api/feedback/ledger?from=&to=&centreId=
-// The raw four-numbers view for the variance screen.
+// The raw per-centre view for the variance screen.
 // ---------------------------------------------------------------------------
 router.get('/ledger', requireAuth, async (req: AuthRequest, res) => {
   try {
@@ -252,7 +296,8 @@ router.get('/ledger', requireAuth, async (req: AuthRequest, res) => {
 
     const [rows]: any = await pool.query(
       `SELECT delivery_date, centre_id, centre_name, is_gate,
-              app_indent, excel_indent, plant_indent,
+              app_indent, app_expected_arrival, excel_indent,
+              plant_indent, plant_expected_arrival, plant_basis_indent,
               reason_code, reason_note, saw_recommendation,
               actual_indent, actual_arrival,
               requirement, d1_weight, ml_maturity, week_of_season
@@ -271,13 +316,23 @@ router.get('/ledger', requireAuth, async (req: AuthRequest, res) => {
 
 // ---------------------------------------------------------------------------
 // GET /api/feedback/scorecard?from=&to=
-// Who was closer to the cane that actually arrived — the app or the plant team?
+// Who forecast the arriving cane better — the app or the plant team?
 //
-// Both are scored against actual_arrival, never against each other. Scoring the
-// plant team against their own number would just teach us to copy them.
+// Both sides answer the SAME question: given the indent that was actually
+// placed, how much cane turns up? Each forecast is reduced to the yield it
+// implies and re-stated against the real order:
 //
-// Only rows where the plant team actually entered a number are counted, so the
-// comparison is like-for-like: these are the days they chose to disagree.
+//   app   yield = app_expected_arrival   / app_indent          (== ml_maturity)
+//   plant yield = plant_expected_arrival / plant_basis_indent
+//   predicted   = actual_indent * yield
+//
+// That step matters because the two sides may have assumed different order
+// sizes. Comparing their raw quintal figures would hand the win to whoever
+// happened to assume an order closer to the one finally placed, which is luck,
+// not forecasting.
+//
+// Neither side is ever scored against the other, and neither is scored against
+// the order. The order is a decision; only the arrival is a fact.
 // ---------------------------------------------------------------------------
 router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
   try {
@@ -288,26 +343,44 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
       return res.status(400).json({ ok: false, error: 'from and to must be YYYY-MM-DD' });
     }
 
+    const appPred = '(actual_indent * (app_expected_arrival / app_indent))';
+    const plantPred = '(actual_indent * (plant_expected_arrival / plant_basis_indent))';
+
     // Volume-weighted error, the same measure used to validate v1: total
     // absolute gap divided by total actual volume. Averaging daily percentages
     // would let near-zero days dominate.
+    //
+    // The signed bias sits beside it because the direction of a forecast error
+    // decides what the mill does about it: consistently expecting more cane
+    // than arrives means the yard runs short, which is a different problem from
+    // an error that averages out.
     const metrics = `
-      COUNT(*)                                                AS cases,
-      SUM(actual_arrival)                                     AS actual_volume,
-      SUM(ABS(app_indent   - actual_arrival))                 AS app_abs_error,
-      SUM(ABS(plant_indent - actual_arrival))                 AS plant_abs_error,
-      SUM(CASE WHEN ABS(app_indent - actual_arrival)
-                  < ABS(plant_indent - actual_arrival) THEN 1 ELSE 0 END) AS app_wins,
-      SUM(CASE WHEN ABS(plant_indent - actual_arrival)
-                  < ABS(app_indent  - actual_arrival) THEN 1 ELSE 0 END) AS plant_wins`;
+      COUNT(*)                                        AS cases,
+      SUM(actual_arrival)                             AS actual_volume,
+      SUM(actual_indent)                              AS indent_volume,
+      SUM(ABS(${appPred}   - actual_arrival))         AS app_abs_error,
+      SUM(ABS(${plantPred} - actual_arrival))         AS plant_abs_error,
+      SUM(${appPred}   - actual_arrival)              AS app_bias,
+      SUM(${plantPred} - actual_arrival)              AS plant_bias,
+      SUM(${appPred})                                 AS app_pred_volume,
+      SUM(${plantPred})                               AS plant_pred_volume,
+      SUM(CASE WHEN ABS(${appPred} - actual_arrival)
+                 < ABS(${plantPred} - actual_arrival) THEN 1 ELSE 0 END) AS app_wins,
+      SUM(CASE WHEN ABS(${plantPred} - actual_arrival)
+                 < ABS(${appPred}   - actual_arrival) THEN 1 ELSE 0 END) AS plant_wins`;
 
+    // Every denominator used above is forced positive here, so no row can
+    // contribute a NULL or a division by zero to the sums.
     const scope = `
       FROM indent_ledger
      WHERE org_id = ? AND delivery_date BETWEEN ? AND ?
-       AND plant_indent  IS NOT NULL
-       AND app_indent    IS NOT NULL
-       AND actual_arrival IS NOT NULL
-       AND actual_arrival > 0`;
+       AND plant_expected_arrival IS NOT NULL
+       AND plant_basis_indent     > 0
+       AND app_expected_arrival   IS NOT NULL
+       AND app_indent             > 0
+       AND actual_indent          > 0
+       AND actual_arrival         IS NOT NULL
+       AND actual_arrival         > 0`;
 
     const [overall]: any = await pool.query(
       `SELECT ${metrics} ${scope}`, [user.orgId, from, to]
@@ -323,13 +396,16 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
         ORDER BY cases DESC`, [user.orgId, from, to]
     );
 
-    // Coverage: how much of the period has a plant-team number at all. A
-    // scorecard built on a handful of cases is not evidence, so the screen
-    // needs to show this alongside the result.
+    // Coverage: how much of the period can be scored at all. A scorecard built
+    // on a handful of cases is not evidence, so the screen shows this beside
+    // the result. with_both is the count that actually drives the comparison.
     const [coverage]: any = await pool.query(
       `SELECT COUNT(*) AS total_rows,
-              SUM(plant_indent   IS NOT NULL) AS with_plant,
-              SUM(actual_arrival IS NOT NULL) AS with_arrival
+              SUM(plant_expected_arrival IS NOT NULL) AS with_plant,
+              SUM(actual_arrival IS NOT NULL)         AS with_arrival,
+              SUM(plant_expected_arrival IS NOT NULL
+                  AND actual_arrival IS NOT NULL
+                  AND actual_indent > 0)              AS with_both
          FROM indent_ledger
         WHERE org_id = ? AND delivery_date BETWEEN ? AND ?`,
       [user.orgId, from, to]

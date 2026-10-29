@@ -1,13 +1,22 @@
 /**
  * Version 2 feedback loop — client for /api/feedback.
  *
- * Four numbers are recorded per centre per delivery day:
- *   1. what the app recommended      (saved automatically after each run)
- *   2. what the plant team would order, and why  (entered by hand, only where they disagree)
+ * What gets compared is the FORECAST, not the order. The indent is the plant
+ * team's own decision, so recording their indent number measured nothing; the
+ * prediction hidden inside an indent is "if we order this much, how much cane
+ * will actually come in?". That is what the model predicts, and the one thing
+ * both sides can be judged on.
+ *
+ * Recorded per centre per delivery day:
+ *   1. the app's recommendation, and the arrival it expects against it
+ *      (saved automatically after each run)
+ *   2. the cane the plant team expects to arrive, the order their expectation
+ *      assumes, and why they differ  (entered by hand, only where they differ)
  *   3. what was actually indented
  *   4. what actually arrived         (known three days later)
  *
- * Both (1) and (2) are later scored against (4) — never against each other.
+ * Both forecasts are scored against (4), never against each other, and never
+ * against (3) — the order is a decision, only the arrival is a fact.
  */
 import { apiFetch } from './apiClient';
 import type { IndentResultRow } from '../types';
@@ -23,8 +32,11 @@ export interface LedgerRow {
   centre_name: string | null;
   is_gate: 0 | 1;
   app_indent: string | null;
+  app_expected_arrival: string | null;
   excel_indent: string | null;
   plant_indent: string | null;
+  plant_expected_arrival: string | null;
+  plant_basis_indent: string | null;
   reason_code: string | null;
   reason_note: string | null;
   saw_recommendation: 0 | 1 | null;
@@ -38,9 +50,17 @@ export interface LedgerRow {
 
 export interface ScorecardGroup {
   cases: number;
+  /** Cane that actually arrived — what both forecasts are measured against. */
   actual_volume: string | null;
+  /** Cane that was actually ordered — the basis both forecasts are re-stated on. */
+  indent_volume: string | null;
   app_abs_error: string | null;
   plant_abs_error: string | null;
+  /** Signed error: positive means the forecast expected more cane than arrived. */
+  app_bias: string | null;
+  plant_bias: string | null;
+  app_pred_volume: string | null;
+  plant_pred_volume: string | null;
   app_wins: number;
   plant_wins: number;
   centre_id?: string;
@@ -53,7 +73,13 @@ export interface Scorecard {
   overall: ScorecardGroup;
   byCentre: ScorecardGroup[];
   byReason: ScorecardGroup[];
-  coverage: { total_rows: number; with_plant: number; with_arrival: number };
+  coverage: {
+    total_rows: number;
+    with_plant: number;
+    with_arrival: number;
+    /** Rows that can actually be scored — the number the verdict rests on. */
+    with_both: number;
+  };
 }
 
 /** MySQL DATE wants YYYY-MM-DD, and it must be the local date, not UTC. */
@@ -65,6 +91,21 @@ export const toIsoDate = (d: Date): string => {
 /** Numeric columns come back from MySQL as strings. */
 export const n = (v: string | null | undefined): number | null =>
   v === null || v === undefined ? null : Number(v);
+
+/**
+ * The cane the app expects to actually receive against its own recommendation.
+ *
+ * mlMaturity is TOTAL maturity — every purchase linked back to the indent, over
+ * all the days the cane trickles in on — which is exactly how actual_arrival is
+ * measured, so the two are directly comparable.
+ *
+ * In normal mode this equals the requirement, because the recommendation is
+ * requirement / maturity. It is still computed from the recommendation rather
+ * than read off the requirement, because late-season wind-down mode sets the
+ * indent to the mill's own latest placement and breaks that identity.
+ */
+export const appExpectedArrival = (row: IndentResultRow): number | null =>
+  row.mlMaturity && row.mlMaturity > 0 ? row.indentToRaise * row.mlMaturity : null;
 
 export const getReasonCodes = (token: string) =>
   apiFetch<{ ok: boolean; reasonCodes: ReasonCode[] }>('/api/feedback/reason-codes', { token });
@@ -92,6 +133,7 @@ export const savePredictions = (
         centreName: r.centreName,
         isGate: isGateMap.get(r.centreId) ?? false,
         appIndent: r.indentToRaise,
+        appExpectedArrival: appExpectedArrival(r),
         excelIndent: r.dWeightIndent,
         requirement: r.mlAdjusted ?? r.adjusted,
         forecastT3: r.forecastT3,
@@ -101,12 +143,24 @@ export const savePredictions = (
     }),
   });
 
-/** The plant team's own number. Pass plantIndent: null to clear it. */
-export const savePlantInput = (
+/**
+ * The plant team's forecast for one centre: the cane they expect to receive,
+ * and the order that expectation assumes.
+ *
+ * basisIndent must be the order the number was typed against — the app's
+ * recommendation unless they said they will order something else. It is sent
+ * and stored rather than inferred later, so a re-run that moves the
+ * recommendation cannot silently rewrite the yield they implied.
+ *
+ * Pass plantExpectedArrival: null to clear the entry.
+ */
+export const savePlantExpectation = (
   token: string,
   deliveryDate: Date,
   centreId: string,
-  plantIndent: number | null,
+  plantExpectedArrival: number | null,
+  basisIndent: number | null,
+  plantIndent: number | null = null,
   reasonCode?: string | null,
   reasonNote?: string | null,
   sawRecommendation = true,
@@ -117,6 +171,8 @@ export const savePlantInput = (
     body: JSON.stringify({
       deliveryDate: toIsoDate(deliveryDate),
       centreId,
+      plantExpectedArrival,
+      basisIndent,
       plantIndent,
       reasonCode,
       reasonNote,
@@ -254,4 +310,21 @@ export const accuracyPct = (absError: string | null, volume: string | null): num
   const e = n(absError), v = n(volume);
   if (e === null || v === null || v <= 0) return null;
   return 100 - (e / v) * 100;
+};
+
+/**
+ * Signed error as a share of the cane that arrived. Positive means the forecast
+ * expected more cane than turned up, which is the direction that empties a yard.
+ */
+export const biasPct = (bias: string | null, volume: string | null): number | null => {
+  const b = n(bias), v = n(volume);
+  if (b === null || v === null || v <= 0) return null;
+  return (b / v) * 100;
+};
+
+/** Delivered share of an order, as a percentage. */
+export const yieldPct = (arrived: string | null, ordered: string | null): number | null => {
+  const a = n(arrived), o = n(ordered);
+  if (a === null || o === null || o <= 0) return null;
+  return (a / o) * 100;
 };

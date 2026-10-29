@@ -5,10 +5,10 @@ import { exportToCsv } from '../services/exportService';
 import { useAuth } from '../context/AuthContext';
 import { addDays } from '../services/dateUtils';
 import {
-    getReasonCodes, savePredictions, savePlantInput, getLedger, n,
-    type ReasonCode,
+    getReasonCodes, savePredictions, savePlantExpectation, getLedger, n,
+    appExpectedArrival, type ReasonCode,
 } from '../services/feedbackService';
-import { PlantInputCell, needsReason, type SaveState } from './PlantInputColumn';
+import { PlantInputCell, needsReason, basisFor, type SaveState } from './PlantInputColumn';
 
 interface IndentTableProps {
     results: CalculationResults;
@@ -18,7 +18,10 @@ interface IndentTableProps {
 }
 
 interface PlantEntry {
+    /** Cane the plant team expects to arrive, in quintals. */
     value: number | null;
+    /** The order that expectation assumes; null means the app's recommendation. */
+    basisIndent: number | null;
     reasonCode: string | null;
     reasonNote: string | null;
 }
@@ -76,9 +79,10 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
                 setReasonCodes(codes.reasonCodes);
                 const existing: Record<string, PlantEntry> = {};
                 for (const r of ledger.rows) {
-                    if (r.plant_indent !== null) {
+                    if (r.plant_expected_arrival !== null) {
                         existing[r.centre_id] = {
-                            value: n(r.plant_indent),
+                            value: n(r.plant_expected_arrival),
+                            basisIndent: n(r.plant_indent),
                             reasonCode: r.reason_code,
                             reasonNote: r.reason_note,
                         };
@@ -98,17 +102,39 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
     }, [feedbackOn, token, deliveryDate?.getTime(), tableData]);
 
     const handlePlantChange = useCallback(
-        (centreId: string, value: number | null, reasonCode: string | null, reasonNote: string | null) => {
-            setPlant(prev => ({ ...prev, [centreId]: { value, reasonCode, reasonNote } }));
+        (
+            centreId: string,
+            value: number | null,
+            basisIndent: number | null,
+            reasonCode: string | null,
+            reasonNote: string | null,
+        ) => {
+            setPlant(prev => ({ ...prev, [centreId]: { value, basisIndent, reasonCode, reasonNote } }));
 
             if (!token || !deliveryDate) return;
-            // A number that still needs a reason is held locally until one is
-            // picked, so half-finished entries never reach the ledger.
             const row = tableData.find(r => r.centreId === centreId);
-            if (value !== null && row && needsReason(value, row.indentToRaise) && !reasonCode) return;
+            if (!row) return;
+
+            // A forecast that still needs a reason is held locally until one is
+            // picked, so half-finished entries never reach the ledger.
+            const appExpected = appExpectedArrival(row);
+            if (value !== null && needsReason(value, basisIndent, row.indentToRaise, appExpected) && !reasonCode) return;
+
+            // A forecast without a positive order behind it cannot be turned
+            // into a yield, so there is nothing comparable to store yet. This
+            // only arises where the app recommends nothing and the plant team
+            // still expects cane; the cell asks them for the order in that case.
+            const basis = basisFor(basisIndent, row.indentToRaise);
+            if (value !== null && basis <= 0) return;
 
             setSaveStates(s => ({ ...s, [centreId]: 'saving' }));
-            savePlantInput(token, deliveryDate, centreId, value, reasonCode, reasonNote, true)
+            savePlantExpectation(
+                token, deliveryDate, centreId,
+                value,
+                value === null ? null : basis,
+                basisIndent,
+                reasonCode, reasonNote, true,
+            )
                 .then(() => setSaveStates(s => ({ ...s, [centreId]: 'saved' })))
                 .catch(() => setSaveStates(s => ({ ...s, [centreId]: 'error' })));
         },
@@ -116,8 +142,12 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
     );
 
     const enteredCount = Object.values(plant).filter((p: PlantEntry) => p.value !== null).length;
-    const totalPlant   = tableData.reduce(
-        (sum, r) => sum + (plant[r.centreId]?.value ?? r.indentToRaise), 0);
+    // Total cane expected: the plant team's figure where they gave one, the
+    // app's where they did not. This is an ARRIVAL total, not an order total.
+    const totalExpected = tableData.reduce(
+        (sum, r) => sum + (plant[r.centreId]?.value ?? appExpectedArrival(r) ?? 0), 0);
+    const totalAppExpected = tableData.reduce(
+        (sum, r) => sum + (appExpectedArrival(r) ?? 0), 0);
 
     const hasBands       = tableData.some(r => r.bandLow !== undefined);
     const hasMl          = tableData.some(r => r.mlMaturity !== undefined);
@@ -203,17 +233,19 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
             {feedbackOn && (
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 px-4 py-2.5 rounded-lg border text-sm bg-emerald-50 border-emerald-200">
                     <span className="font-semibold text-emerald-800 flex items-center gap-1.5">
-                        <Users size={15} /> Your input
+                        <Users size={15} /> Your call
                     </span>
                     <span className="text-slate-500 text-xs">
-                        Fill in <strong>Your Number</strong> only for centres you would order differently —
-                        blank means you agree with the app. Where the gap is more than 10% we ask why, because
-                        the reason is what teaches the model something it cannot see in the cane data.
+                        The order is your decision either way. What we compare is the <strong>forecast</strong>:
+                        against the indent below, how much cane do you expect to actually come in? Fill
+                        in <strong>You expect</strong> only where you expect something different from the app —
+                        blank means you agree. Over a 10% gap we ask why, because the reason is what teaches
+                        the model something it cannot see in the cane data.
                     </span>
                     <span className="text-emerald-700 font-medium text-xs whitespace-nowrap">
                         {enteredCount === 0
-                            ? 'No changes entered'
-                            : `${enteredCount} centre${enteredCount === 1 ? '' : 's'} changed`}
+                            ? 'No forecast entered'
+                            : `${enteredCount} centre${enteredCount === 1 ? '' : 's'} differ`}
                     </span>
                     {loadError && (
                         <span className="text-amber-700 font-medium text-xs">
@@ -267,8 +299,8 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
                             {feedbackOn && (
                                 <th scope="col"
                                     className="px-4 py-3 text-right bg-emerald-50 text-emerald-900 font-bold sticky right-0 z-20 w-[180px] shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]"
-                                    title="What you would order. Leave blank where you agree with the app — blank means agreement. Enter a number only for centres you would order differently.">
-                                    Your Number
+                                    title="How much cane you expect to actually arrive against the indent to its left. Leave blank where you agree with the app's expectation. This is a forecast, not an order — the order stays your decision.">
+                                    You expect (Qtls)
                                 </th>
                             )}
                         </tr>
@@ -319,7 +351,9 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
                                             <PlantInputCell
                                                 centreId={row.centreId}
                                                 appIndent={row.indentToRaise}
+                                                appExpected={appExpectedArrival(row)}
                                                 value={plant[row.centreId]?.value ?? null}
+                                                basisIndent={plant[row.centreId]?.basisIndent ?? null}
                                                 reasonCode={plant[row.centreId]?.reasonCode ?? null}
                                                 reasonNote={plant[row.centreId]?.reasonNote ?? null}
                                                 reasonCodes={reasonCodes}
@@ -347,8 +381,15 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
                             </td>
                             {feedbackOn && (
                                 <td className="px-4 py-4 text-right bg-emerald-50 text-emerald-900 text-lg rounded-br-lg sticky right-0 z-20 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]"
-                                    title="Your total: your own numbers where entered, the app's where left blank">
-                                    {totalPlant.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    title={`Total cane expected to arrive: your figures where entered, the app's where left blank. The app alone expects ${totalAppExpected.toLocaleString(undefined, { maximumFractionDigits: 0 })} qtl.`}>
+                                    <div className="flex flex-col items-end leading-tight">
+                                        <span>{totalExpected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                        {Math.round(totalExpected) !== Math.round(totalAppExpected) && (
+                                            <span className="text-[10px] font-medium text-slate-500">
+                                                app: {totalAppExpected.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                            </span>
+                                        )}
+                                    </div>
                                 </td>
                             )}
                         </tr>
