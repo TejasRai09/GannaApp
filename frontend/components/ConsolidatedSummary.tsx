@@ -3,7 +3,7 @@ import React, { useMemo, useState } from 'react';
 import type { CalculationRun, StoredData, Indent, Purchase, Bonding } from '../types';
 import { TrendChart } from './TrendChart';
 import { parseDate, addDays, daysBetween, isSameDay, formatDateGB } from '../services/dateUtils';
-import { TrendingUp, ClipboardCheck, Lightbulb, BarChart3, Target, Activity, Search, Waves, AlertCircle, Clock, Filter, PieChart } from 'lucide-react';
+import { TrendingUp, ClipboardCheck, Lightbulb, BarChart3, Target, Activity, Search, Waves, AlertCircle, AlertTriangle, Clock, Filter, PieChart } from 'lucide-react';
 import { InfoIcon } from './InfoIcon';
 
 interface ConsolidatedSummaryProps {
@@ -107,10 +107,26 @@ const ChartCard: React.FC<{
     </div>
 );
 
+/**
+ * Whole number, or an em-dash when there is no number to show.
+ *
+ * Math.round(NaN).toLocaleString() renders the literal string "NaN", which is
+ * how this dashboard came to show NaN in four places at once. A dash says
+ * "nothing to show here" honestly; "NaN" says the app is broken.
+ */
+const fmtInt = (v: unknown): string =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.round(v).toLocaleString() : '—';
+
+/** Percentage with a sign, or an em-dash. */
+const fmtPct = (v: unknown, dp = 2): string =>
+    typeof v === 'number' && Number.isFinite(v)
+        ? `${v > 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`
+        : '—';
+
 const ActionCard: React.FC<{ title: string; value: number }> = ({ title, value }) => (
     <div className="flex-1 bg-slate-50 p-3 rounded-lg border text-center">
         <p className="text-xs text-slate-500 font-semibold uppercase">{title}</p>
-        <p className="text-xl font-bold text-[#003580] my-1">{Math.round(value).toLocaleString()}</p>
+        <p className="text-xl font-bold text-[#003580] my-1">{fmtInt(value)}</p>
         <p className="text-[10px] text-slate-400">Qtls to order</p>
     </div>
 );
@@ -666,6 +682,28 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                 </div>
             </div>
 
+            {/* A calculation run before the season start was set came back as all
+                zeros, because an empty start date parsed to the epoch and pushed
+                every centre into late-season wind-down mode. Those runs are still
+                in history, so say plainly that the figures below are stale rather
+                than letting a page of dashes look like a fresh answer. */}
+            {(() => {
+                const day = seasonStats.daysLapsed;
+                const stale = !Number.isFinite(day) || day < 0 || day > seasonStats.totalDays * 3;
+                if (!stale) return null;
+                return (
+                    <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-sm">
+                        <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+                        <span>
+                            <strong>These figures are from an out-of-date calculation.</strong>{' '}
+                            It was run before the season start date was set, so it has no valid
+                            season to measure against and came back empty. Run the calculation
+                            again to refresh the dashboard.
+                        </span>
+                    </div>
+                );
+            })()}
+
             {/* 1. Season Status Header (Context Aware) */}
             <div className={`text-white p-4 rounded-xl shadow-lg border ${selectedScope === 'all' ? 'bg-[#001f4c] border-[#003580]' : 'bg-[#003580] border-[#001f4c]'}`}>
                 <div className="flex flex-col md:flex-row justify-between items-center gap-6">
@@ -688,14 +726,14 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                     <div className="flex gap-8 text-center md:text-right">
                         <div>
                             <p className="text-xs uppercase tracking-wider text-blue-300 mb-1">Cumulative Rate</p>
-                            <p className="text-2xl font-bold font-mono">{Math.round(seasonStats.cumulativeRunRate).toLocaleString()}</p>
+                            <p className="text-2xl font-bold font-mono">{fmtInt(seasonStats.cumulativeRunRate)}</p>
                             <p className="text-[10px] text-blue-300">Avg. Daily Purchase</p>
                         </div>
                         <div className="pl-8 border-l border-blue-800">
                             {selectedScope === 'all' ? (
                                 <>
                                     <p className="text-xs uppercase tracking-wider text-cyan-300 mb-1 font-bold">Net Required Rate</p>
-                                    <p className="text-2xl font-bold font-mono text-cyan-300">{Math.round(seasonStats.netRequiredRunRate).toLocaleString()}</p>
+                                    <p className="text-2xl font-bold font-mono text-cyan-300">{fmtInt(seasonStats.netRequiredRunRate)}</p>
                                     <p className="text-[10px] text-blue-300">To Meet 100% Capacity</p>
                                 </>
                             ) : (
@@ -736,7 +774,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                 <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-4 h-full">
                     <KPICard 
                         title="Effective Requirement" 
-                        value={`${Math.round(scopeMetrics.effectiveRequirement).toLocaleString()}`} 
+                        value={fmtInt(scopeMetrics.effectiveRequirement)} 
                         subtext={`Target for T+3 (${selectedScope === 'all' ? 'Plant' : 'Center'})`}
                         tooltip="The adjusted daily crushing target. If viewing All Centers, this is based on plant capacity. If viewing a single Center, this is its specific 'Requirement by Bonding'."
                         icon={<Target size={20} className="text-blue-600"/>} 
@@ -744,7 +782,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                     />
                     <KPICard 
                         title="Forecast Pipeline" 
-                        value={`${Math.round(scopeMetrics.forecastT3).toLocaleString()}`} 
+                        value={fmtInt(scopeMetrics.forecastT3)} 
                         subtext="Expected on T+3 from past"
                         tooltip="The quantity of cane expected to arrive on T+3 resulting from indents already placed in the previous three days (the 'pipeline' quantity) for the selected scope."
                         icon={<BarChart3 size={20} className="text-purple-600"/>} 
@@ -752,7 +790,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                     />
                     <KPICard
                         title={selectedScope === 'all' ? "Delivery vs Orders" : "Centre Delivery vs Orders"}
-                        value={`${(scopeMetrics.overrunPercentage > 0 ? '+' : '')}${(scopeMetrics.overrunPercentage * 100).toFixed(2)}%`}
+                        value={fmtPct(scopeMetrics.overrunPercentage)}
                         subtext="Season to date"
                         tooltip="How much cane has arrived this season compared with everything ordered. Negative = farmers delivered less than indented (the usual case); positive = they delivered more."
                         icon={<TrendingUp size={20} className="text-orange-600"/>}
