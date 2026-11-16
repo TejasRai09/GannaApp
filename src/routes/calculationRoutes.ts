@@ -85,11 +85,13 @@ router.get('/my-org', requireAuth, async (req: AuthRequest, res) => {
     const user = req.user!;
 
     const [rows]: any = await pool.query(
-      `SELECT id, org_id, user_id, name, inputs_json, created_at
+      `SELECT id, org_id, user_id, name,
+              JSON_REMOVE(inputs_json, ${BULK_INPUTS.map(() => '?').join(', ')}) AS inputs_json,
+              created_at
        FROM calculation_runs
        WHERE org_id = ?
        ORDER BY created_at DESC`,
-      [user.orgId]
+      [...BULK_INPUTS, user.orgId]
     );
 
     res.json({ ok: true, runs: rows });
@@ -114,6 +116,14 @@ router.get('/my-org', requireAuth, async (req: AuthRequest, res) => {
  * server never loads them into memory, which matters on a 2 GB instance with
  * several viewers refreshing at once.
  */
+/**
+ * Older runs stored the entire source dataset inside inputs_json — every
+ * bonding, indent and purchase row. Twenty of them made the history list a
+ * 100 MB, 22-second response on every login. New runs no longer save it, but
+ * these are stripped on read so existing rows stop hurting too.
+ */
+const BULK_INPUTS = ['$.bondingData', '$.indentData', '$.purchaseData'];
+
 const HEAVY_FIELDS = [
   '$.maturityAnalysisPurchases',
   '$.fullSeasonAnalysis',
@@ -129,10 +139,13 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
     const resultsExpr = summary
       ? `JSON_REMOVE(results_json, ${HEAVY_FIELDS.map(() => '?').join(', ')}) AS results_json`
       : 'results_json';
-    const params = summary ? [...HEAVY_FIELDS, id, user.orgId] : [id, user.orgId];
+    const inputsExpr = `JSON_REMOVE(inputs_json, ${BULK_INPUTS.map(() => '?').join(', ')}) AS inputs_json`;
+    const params = summary
+      ? [...HEAVY_FIELDS, ...BULK_INPUTS, id, user.orgId]
+      : [...BULK_INPUTS, id, user.orgId];
 
     const [rows]: any = await pool.query(
-      `SELECT id, org_id, user_id, name, inputs_json, ${resultsExpr}, created_at
+      `SELECT id, org_id, user_id, name, ${inputsExpr}, ${resultsExpr}, created_at
        FROM calculation_runs
        WHERE id = ? AND org_id = ? LIMIT 1`,
       params

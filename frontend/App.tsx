@@ -521,7 +521,14 @@ const AppContent: React.FC = () => {
 
             if (token) {
                 try {
-                    const resp = await saveCalculation(token, newRun.name, inputs, results);
+                    // newRun.inputs, NOT inputs. The full object carries the whole
+                    // source dataset — every bonding, indent and purchase row —
+                    // and saving that put a complete copy of the season inside
+                    // every run. Twenty runs made the history list a 100 MB,
+                    // 22-second download on every single login. The source data
+                    // already lives in org_data_files; a run needs only the
+                    // parameters it was executed with.
+                    const resp = await saveCalculation(token, newRun.name, newRun.inputs as any, results);
                     if (resp?.run) {
                         const dbId = String(resp.run.id);
                         // Keep the in-memory results (already correct) — just swap the temp ID for the DB ID
