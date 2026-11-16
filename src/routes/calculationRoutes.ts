@@ -18,16 +18,24 @@ router.post('/', requireAuth, requireRole('auditor'), async (req: AuthRequest, r
       return res.status(400).json({ ok: false, error: 'Missing name, inputs or results' });
     }
 
+    // Computed here, once, because the history list cannot afford to carry
+    // results_json and so cannot sum tableData itself.
+    const table = Array.isArray((results as any)?.tableData) ? (results as any).tableData : [];
+    const totalIndent = table.reduce(
+      (sum: number, r: any) => sum + (Number(r?.indentToRaise) || 0), 0);
+
     const [result]: any = await pool.query(
-      `INSERT INTO calculation_runs (org_id, user_id, name, inputs_json, results_json)
-       VALUES (?, ?, ?, ?, ?)`,
-      [user.orgId, user.id, name, JSON.stringify(inputs), JSON.stringify(results)]
+      `INSERT INTO calculation_runs
+         (org_id, user_id, name, inputs_json, results_json, total_indent, centre_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [user.orgId, user.id, name, JSON.stringify(inputs), JSON.stringify(results),
+       totalIndent, table.length]
     );
 
     const insertedId = result.insertId;
 
     const [rows]: any = await pool.query(
-      `SELECT id, org_id, user_id, name, inputs_json, created_at
+      `SELECT id, org_id, user_id, name, inputs_json, total_indent, centre_count, created_at
        FROM calculation_runs WHERE id = ? LIMIT 1`,
       [insertedId]
     );
@@ -87,7 +95,7 @@ router.get('/my-org', requireAuth, async (req: AuthRequest, res) => {
     const [rows]: any = await pool.query(
       `SELECT id, org_id, user_id, name,
               JSON_REMOVE(inputs_json, ${BULK_INPUTS.map(() => '?').join(', ')}) AS inputs_json,
-              created_at
+              total_indent, centre_count, created_at
        FROM calculation_runs
        WHERE org_id = ?
        ORDER BY created_at DESC`,
@@ -148,7 +156,7 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
       : [...BULK_INPUTS, id, user.orgId];
 
     const [rows]: any = await pool.query(
-      `SELECT id, org_id, user_id, name, ${inputsExpr}, ${resultsExpr}, created_at
+      `SELECT id, org_id, user_id, name, ${inputsExpr}, ${resultsExpr}, total_indent, centre_count, created_at
        FROM calculation_runs
        WHERE id = ? AND org_id = ? LIMIT 1`,
       params

@@ -335,6 +335,10 @@ export interface CalculationResults {
 }
 
 export interface CalculationRun {
+    /** Total recommended indent, stored at save time so the history list can
+     *  show it without downloading the whole results payload. */
+    totalIndent?: number;
+    centreCount?: number;
     id: string;
     name: string;
     timestamp: number;

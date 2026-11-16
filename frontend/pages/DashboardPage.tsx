@@ -191,7 +191,7 @@ export const DashboardPage: React.FC<DashboardProps> = (props) => {
                                                 <div className="flex items-center gap-4 mt-3 sm:mt-0">
                                                     <div className="text-right">
                                                         <p className="text-xs text-slate-500">Total Indent</p>
-                                                        <p className="font-bold text-lg text-[#003580]">{run.results.tableData.reduce((s, r) => s + r.indentToRaise, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-sm font-normal text-slate-600">Qtls</span></p>
+                                                        <p className="font-bold text-lg text-[#003580]">{(run.totalIndent ?? run.results.tableData.reduce((s, r) => s + r.indentToRaise, 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-sm font-normal text-slate-600">Qtls</span></p>
                                                     </div>
                                                     <button
                                                         onClick={() => onViewHistoryItem(run.id)}

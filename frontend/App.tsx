@@ -141,6 +141,13 @@ const AppContent: React.FC = () => {
             timestamp: new Date(r.created_at || Date.now()).getTime(),
             inputs: safeParse(inputsRaw),
             results: normalizedResults,
+            // Computed and stored at save time. The history list cannot carry
+            // results_json (megabytes per run), so without this every row
+            // summed an empty tableData and displayed 0.00 Qtls.
+            totalIndent: r.total_indent !== undefined && r.total_indent !== null
+                ? Number(r.total_indent)
+                : undefined,
+            centreCount: r.centre_count ?? undefined,
         } as CalculationRun;
     }, []);
 
