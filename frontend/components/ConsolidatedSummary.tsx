@@ -16,6 +16,8 @@ interface ConsolidatedSummaryProps {
     /** The organisation's configured season start, YYYY-MM-DD. Used when a saved
      *  calculation has none of its own, instead of guessing at 1 October. */
     orgSeasonStartDate?: string | null;
+    /** Days between placing an indent and its delivery day. Configured per org. */
+    deliveryLagDays?: number;
 }
 
 // Helper to safely find values in loose CSV data (handles 'Code ', 'code', 'Center Name', etc.)
@@ -143,6 +145,7 @@ const SectionHeader: React.FC<{ title: string; icon: React.ReactNode }> = ({ tit
 
 export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) => {
     const { indentData, purchaseData, bondingData, calculationHistory, seasonTotalDays, seasonalCrushingCapacity, orgSeasonStartDate } = props;
+    const deliveryLagDays = props.deliveryLagDays ?? 3;
     
     // Global Scope State
     const [selectedScope, setSelectedScope] = useState('all');
@@ -290,9 +293,15 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
         for (let i = 1; i <= 5; i++) {
             const date = addDays(currentDate, -i);
             
+            // A run made on day X recommends for delivery on X + the lag, so the
+            // run that predicted THIS row is the one made `lag` days earlier.
+            // Matching run-day straight against delivery-day compared the
+            // recommendation written on the 15th with the indent placed for the
+            // 15th — two different days' decisions.
             const historyRun = calculationHistory.find(run => {
                 const runDate = new Date(run.inputs.currentDate);
-                return isSameDay(runDate, date);
+                if (isNaN(runDate.getTime())) return false;
+                return isSameDay(addDays(runDate, deliveryLagDays), date);
             });
             
             const actualIndent = indentData.data
@@ -598,7 +607,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
             unifiedLifecycleData,
             scopeMetrics
         };
-    }, [indentData, purchaseData, bondingData, calculationHistory, seasonTotalDays, seasonalCrushingCapacity, orgSeasonStartDate, dailyTarget, selectedScope]);
+    }, [indentData, purchaseData, bondingData, calculationHistory, seasonTotalDays, seasonalCrushingCapacity, orgSeasonStartDate, deliveryLagDays, dailyTarget, selectedScope]);
 
     // --- Filter Logic ---
     const filterDataByRange = (data: any[], range: string, currentDate: Date | undefined, seasonStart: Date | undefined, extendForwardDays: number = 0) => {
@@ -844,7 +853,9 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono text-slate-500">{row.target.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
                                         <td className="px-3 py-2 text-right font-mono">
-                                            {row.predicted ? row.predicted.toLocaleString(undefined, {maximumFractionDigits: 0}) : <span className="text-slate-300">-</span>}
+                                            {row.predicted
+                                                ? row.predicted.toLocaleString(undefined, {maximumFractionDigits: 0})
+                                                : <span className="text-slate-400 text-xs italic" title={`No calculation was run ${deliveryLagDays} days before this delivery day, so there is no recommendation to compare against.`}>not run</span>}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono font-semibold text-slate-800">
                                             {row.actual > 0 ? row.actual.toLocaleString() : <span className="text-slate-300">-</span>}

@@ -927,6 +927,7 @@ const AppContent: React.FC = () => {
             infoMessage={info} onGoToCalculator={navigateToCalculator} onViewHistoryItem={handleViewHistoryItem}
             onClearAllData={handleClearAllData} seasonTotalDays={seasonTotalDays}
             orgSeasonStartDate={plantStartDate || null}
+            deliveryLagDays={orgSettings?.deliveryLagDays}
             seasonalCrushingCapacity={seasonalCrushingCapacity}
             centerMapping={centerMapping}
             handleFileUpdate={handleFileUpdate}
