@@ -240,10 +240,52 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
             overrunPercentage = centerIndents > 0 ? (centerPurchases / centerIndents) - 1 : 0;
         }
 
+        /**
+         * Delivery rate over SETTLED indent days only.
+         *
+         * overrunPercentage compares every indent ever placed against every
+         * purchase received, which includes indent dates that have not happened
+         * yet. Cane cannot have arrived against a future order, so that figure
+         * is structurally terrible: it read -43% while the mill was actually
+         * running at 89%. It is left untouched because the Excel comparison
+         * column divides by it; this is the honest number to SHOW.
+         *
+         * An indent day is settled once cane has had its full four-day arrival
+         * window (D1 to D4) to come in.
+         */
+        const settledDelivery = (() => {
+            const inScope = (row: any) =>
+                selectedScope === 'all' || getValue(row, ['Code']).trim() === selectedScope;
+
+            let latestArrival: Date | null = null;
+            for (const row of purchaseData.data) {
+                const d = parseDate(getValue(row, ['Purchase Date']));
+                if (d && (!latestArrival || d > latestArrival)) latestArrival = d;
+            }
+            if (!latestArrival) return null;
+            // Fully settled means the whole D1..D4 window has passed.
+            const cutoff = addDays(latestArrival, -3);
+
+            let ordered = 0, arrived = 0;
+            for (const row of indentData.data) {
+                if (!inScope(row)) continue;
+                const d = parseDate(getValue(row, ['Indent Date']));
+                if (d && d <= cutoff) ordered += parseFloat(getValue(row, ['Qty in Qtls', 'Qty'])) || 0;
+            }
+            for (const row of purchaseData.data) {
+                if (!inScope(row)) continue;
+                const d = parseDate(getValue(row, ['Indent Date']));
+                if (d && d <= cutoff) arrived += parseFloat(getValue(row, ['Qty in Qtls', 'Qty'])) || 0;
+            }
+            if (ordered <= 0) return null;
+            return { rate: arrived / ordered, ordered, arrived, cutoff };
+        })();
+
         const scopeMetrics = {
             effectiveRequirement,
             forecastT3,
-            overrunPercentage
+            overrunPercentage,
+            settledDelivery
         };
 
 
@@ -828,10 +870,14 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                         color="bg-purple-100" 
                     />
                     <KPICard
-                        title={selectedScope === 'all' ? "Delivery vs Orders" : "Centre Delivery vs Orders"}
-                        value={fmtPct(scopeMetrics.overrunPercentage)}
-                        subtext="Season to date"
-                        tooltip="How much cane has arrived this season compared with everything ordered. Negative = farmers delivered less than indented (the usual case); positive = they delivered more."
+                        title={selectedScope === 'all' ? "Delivery Rate" : "Centre Delivery Rate"}
+                        value={scopeMetrics.settledDelivery
+                            ? `${(scopeMetrics.settledDelivery.rate * 100).toFixed(1)}%`
+                            : '—'}
+                        subtext={scopeMetrics.settledDelivery
+                            ? `${Math.round(scopeMetrics.settledDelivery.arrived).toLocaleString()} of ${Math.round(scopeMetrics.settledDelivery.ordered).toLocaleString()} qtl`
+                            : 'No settled days yet'}
+                        tooltip="Cane that arrived as a share of cane ordered, counting only indent days whose full four-day arrival window has passed. Recent days are excluded because their cane is still coming in, and days in the future are excluded because no cane can have arrived against them yet — including either makes the mill look far worse than it is."
                         icon={<TrendingUp size={20} className="text-orange-600"/>}
                         color="bg-orange-100"
                     />
