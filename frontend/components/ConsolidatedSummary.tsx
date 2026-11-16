@@ -805,7 +805,20 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
 
                     {/* Middle & Right: Metrics (Conditionals based on Scope) */}
                     <div className="flex gap-8 text-center md:text-right">
+                        {/* Cane taken so far. It was only ever implied here — you had to
+                            multiply the cumulative rate by the day count yourself — and it
+                            is the first thing anyone asks. */}
                         <div>
+                            <p className="text-xs uppercase tracking-wider text-blue-300 mb-1">Cane Received</p>
+                            <p className="text-2xl font-bold font-mono">{fmtInt(seasonStats.totalSeasonPurchases)}</p>
+                            <p className="text-[10px] text-blue-300">
+                                Season to date
+                                {selectedScope === 'all' && seasonalCrushingCapacity > 0
+                                    ? ` · ${((seasonStats.totalSeasonPurchases / seasonalCrushingCapacity) * 100).toFixed(1)}% of capacity`
+                                    : ''}
+                            </p>
+                        </div>
+                        <div className="pl-8 border-l border-blue-800">
                             <p className="text-xs uppercase tracking-wider text-blue-300 mb-1">Cumulative Rate</p>
                             <p className="text-2xl font-bold font-mono">{fmtInt(seasonStats.cumulativeRunRate)}</p>
                             <p className="text-[10px] text-blue-300">Avg. Daily Purchase</p>
