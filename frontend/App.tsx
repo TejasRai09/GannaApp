@@ -298,24 +298,38 @@ const AppContent: React.FC = () => {
         refreshHistory();
     }, [page, token, currentUser, mapCalculationRun]);
 
-    // Auto-fetch full results when activeCalculationId points to a run with empty tableData.
-    // This handles: viewing history items loaded without results_json, or results lost after history refresh.
-    useEffect(() => {
-        if (!activeCalculationId || !token) return;
-        if (fetchedRunIds.current.has(activeCalculationId)) return;
-        const active = calculationHistory.find(r => r.id === activeCalculationId);
-        if (!active || (active.results?.tableData?.length ?? 0) > 0) return;
+    // Pull the full results for whichever run is actually being displayed.
+    //
+    // The list endpoint omits results_json so the history loads fast, which
+    // means every run arrives with an empty results object rather than none at
+    // all. That is fine for a history row, but the DASHBOARD renders the newest
+    // run and never sets activeCalculationId — so nothing ever fetched its
+    // results and it drew a permanently empty shell: zero recommendations,
+    // 0.00 totals in history, and nothing whatsoever for a viewer, who never
+    // opens a history item. The data was always saved; it was never read back.
+    //
+    // So fall back to the newest run when nothing is explicitly selected.
+    const displayedRunId = activeCalculationId ?? calculationHistory[0]?.id ?? null;
 
-        fetchedRunIds.current.add(activeCalculationId);
-        fetchCalculation(token, activeCalculationId)
+    useEffect(() => {
+        if (!displayedRunId || !token) return;
+        if (fetchedRunIds.current.has(displayedRunId)) return;
+        const target = calculationHistory.find(r => r.id === displayedRunId);
+        if (!target || (target.results?.tableData?.length ?? 0) > 0) return;
+
+        fetchedRunIds.current.add(displayedRunId);
+        fetchCalculation(token, displayedRunId)
             .then(resp => {
                 if (resp?.run) {
                     const full = mapCalculationRun(resp.run);
-                    setCalculationHistory(prev => prev.map(r => r.id === activeCalculationId ? full : r));
+                    setCalculationHistory(prev => prev.map(r => r.id === displayedRunId ? full : r));
                 }
             })
-            .catch(() => {});
-    }, [activeCalculationId, token, calculationHistory, mapCalculationRun]);
+            .catch(() => {
+                // Allow a later attempt rather than caching the failure.
+                fetchedRunIds.current.delete(displayedRunId);
+            });
+    }, [displayedRunId, token, calculationHistory, mapCalculationRun]);
     
     const openDataGridModal = (dataType: DataType) => {
         const dataMap = {
