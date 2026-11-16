@@ -140,8 +140,11 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
       ? `JSON_REMOVE(results_json, ${HEAVY_FIELDS.map(() => '?').join(', ')}) AS results_json`
       : 'results_json';
     const inputsExpr = `JSON_REMOVE(inputs_json, ${BULK_INPUTS.map(() => '?').join(', ')}) AS inputs_json`;
+    // Order matters: inputsExpr appears before resultsExpr in the SELECT, so
+    // its placeholders must be bound first. Getting this backwards silently
+    // removes nothing from either column rather than failing.
     const params = summary
-      ? [...HEAVY_FIELDS, ...BULK_INPUTS, id, user.orgId]
+      ? [...BULK_INPUTS, ...HEAVY_FIELDS, id, user.orgId]
       : [...BULK_INPUTS, id, user.orgId];
 
     const [rows]: any = await pool.query(
