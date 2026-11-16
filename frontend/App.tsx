@@ -311,25 +311,38 @@ const AppContent: React.FC = () => {
     // So fall back to the newest run when nothing is explicitly selected.
     const displayedRunId = activeCalculationId ?? calculationHistory[0]?.id ?? null;
 
-    useEffect(() => {
-        if (!displayedRunId || !token) return;
-        if (fetchedRunIds.current.has(displayedRunId)) return;
-        const target = calculationHistory.find(r => r.id === displayedRunId);
-        if (!target || (target.results?.tableData?.length ?? 0) > 0) return;
+    // The dashboard only needs the summary. Ask for the full run only when a
+    // calculation has been opened deliberately, because the detailed analysis
+    // tabs are the only thing that reads the heavy arrays, and those arrays
+    // grow with the season. Cached per id AND per depth, so opening a run that
+    // was previously loaded as a summary still fetches the rest.
+    const wantFull = Boolean(activeCalculationId);
+    const fetchKey = displayedRunId ? `${displayedRunId}:${wantFull ? 'full' : 'summary'}` : null;
 
-        fetchedRunIds.current.add(displayedRunId);
-        fetchCalculation(token, displayedRunId)
+    useEffect(() => {
+        if (!displayedRunId || !fetchKey || !token) return;
+        if (fetchedRunIds.current.has(fetchKey)) return;
+        const target = calculationHistory.find(r => r.id === displayedRunId);
+        if (!target) return;
+        // A summary already in memory still needs replacing when the full run
+        // is wanted, so only skip when what we have is deep enough.
+        const hasTable = (target.results?.tableData?.length ?? 0) > 0;
+        const hasHeavy = (target.results?.maturityAnalysisPurchases?.length ?? 0) > 0;
+        if (hasTable && (!wantFull || hasHeavy)) return;
+
+        fetchedRunIds.current.add(fetchKey);
+        fetchCalculation(token, displayedRunId, !wantFull)
             .then(resp => {
                 if (resp?.run) {
-                    const full = mapCalculationRun(resp.run);
-                    setCalculationHistory(prev => prev.map(r => r.id === displayedRunId ? full : r));
+                    const loaded = mapCalculationRun(resp.run);
+                    setCalculationHistory(prev => prev.map(r => r.id === displayedRunId ? loaded : r));
                 }
             })
             .catch(() => {
                 // Allow a later attempt rather than caching the failure.
-                fetchedRunIds.current.delete(displayedRunId);
+                fetchedRunIds.current.delete(fetchKey);
             });
-    }, [displayedRunId, token, calculationHistory, mapCalculationRun]);
+    }, [displayedRunId, fetchKey, wantFull, token, calculationHistory, mapCalculationRun]);
     
     const openDataGridModal = (dataType: DataType) => {
         const dataMap = {

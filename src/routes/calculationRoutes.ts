@@ -103,16 +103,39 @@ router.get('/my-org', requireAuth, async (req: AuthRequest, res) => {
  * GET /api/calculations/:id
  * Returns a single run with full results_json
  */
+/**
+ * Three arrays inside results_json are only read by the detailed analysis
+ * tabs, and all three grow with the season because they copy source rows:
+ * maturityAnalysisPurchases holds every linked purchase, fullSeasonAnalysis
+ * and closedIndentAnalysis every indent. Together they are most of the
+ * payload, and by season end they would be tens of megabytes per run.
+ *
+ * The dashboard needs none of them, so ?summary=1 drops them in SQL — the
+ * server never loads them into memory, which matters on a 2 GB instance with
+ * several viewers refreshing at once.
+ */
+const HEAVY_FIELDS = [
+  '$.maturityAnalysisPurchases',
+  '$.fullSeasonAnalysis',
+  '$.closedIndentAnalysis',
+];
+
 router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   try {
     const user = req.user!;
     const { id } = req.params;
+    const summary = req.query.summary === '1';
+
+    const resultsExpr = summary
+      ? `JSON_REMOVE(results_json, ${HEAVY_FIELDS.map(() => '?').join(', ')}) AS results_json`
+      : 'results_json';
+    const params = summary ? [...HEAVY_FIELDS, id, user.orgId] : [id, user.orgId];
 
     const [rows]: any = await pool.query(
-      `SELECT id, org_id, user_id, name, inputs_json, results_json, created_at
+      `SELECT id, org_id, user_id, name, inputs_json, ${resultsExpr}, created_at
        FROM calculation_runs
        WHERE id = ? AND org_id = ? LIMIT 1`,
-      [id, user.orgId]
+      params
     );
 
     if (!rows || rows.length === 0) {
