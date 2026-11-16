@@ -2,7 +2,9 @@
 import React, { useState } from 'react';
 import type { Page, DataType } from '../App';
 import type { CalculationRun, StoredData, Bonding, YardBalanceRow } from '../types';
-import { CheckCircle, Info, Calculator, History, Newspaper, Database, AlertCircle } from 'lucide-react';
+import { CheckCircle, Info, Calculator, History, Newspaper, Database, AlertCircle, BarChart3, Eye } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { can } from '../services/permissions';
 import { ConsolidatedSummary } from '../components/ConsolidatedSummary';
 import { Header } from '../components/common/Header';
 import { DataManagerModal } from '../components/DataManagerModal';
@@ -58,6 +60,12 @@ export const DashboardPage: React.FC<DashboardProps> = (props) => {
     } = props;
     
     const [isDataModalOpen, setIsDataModalOpen] = useState(false);
+
+    // What this role can actually do, so the page never offers an action that
+    // ends in a refusal.
+    const { currentUser } = useAuth();
+    const canCalculate = can.calculate(currentUser?.role);
+    const canManageData = can.manageData(currentUser?.role);
 
     const isReadyToCalculate = !!bondingData && !!indentData && !!purchaseData;
     const recentCalculations = calculationHistory.slice(0, 5);
@@ -124,25 +132,47 @@ export const DashboardPage: React.FC<DashboardProps> = (props) => {
                             <div className="bg-white p-6 rounded-xl shadow-md">
                                 <h3 className="text-xl font-bold text-slate-900 border-b pb-2 mb-4">Quick Actions</h3>
                                 <div className="space-y-3">
+                                    {/* Only offer what this role can actually do. A viewer shown
+                                        "Go to Calculator" lands on a refusal, and "Manage Data"
+                                        opens a panel whose every upload is rejected. A dead button
+                                        reads as a broken app. */}
+                                    {canCalculate && (
+                                        <button
+                                            onClick={onGoToCalculator}
+                                            className="w-full flex justify-center items-center gap-3 px-6 py-3 text-base font-bold text-white bg-[#003580] rounded-lg shadow-md hover:bg-[#002a66] transition-all"
+                                        >
+                                            <Calculator size={20}/>
+                                            {isReadyToCalculate ? 'Go to Calculator' : 'Upload Data to Start'}
+                                        </button>
+                                    )}
                                     <button
-                                        onClick={onGoToCalculator}
-                                        className="w-full flex justify-center items-center gap-3 px-6 py-3 text-base font-bold text-white bg-[#003580] rounded-lg shadow-md hover:bg-[#002a66] transition-all"
+                                        onClick={() => onNavigate('variance')}
+                                        className={`w-full flex justify-center items-center gap-3 px-6 py-3 text-base font-bold rounded-lg transition-all ${canCalculate
+                                            ? 'text-[#003580] bg-white shadow-sm border-2 border-[#003580] hover:bg-blue-50'
+                                            : 'text-white bg-[#003580] shadow-md hover:bg-[#002a66]'}`}
                                     >
-                                        <Calculator size={20}/> 
-                                        {isReadyToCalculate ? 'Go to Calculator' : 'Upload Data to Start'}
+                                        <BarChart3 size={20}/> Variance &amp; Scorecard
                                     </button>
-                                     <button
+                                    <button
                                         onClick={() => onNavigate('history')}
                                         className="w-full flex justify-center items-center gap-3 px-6 py-3 text-base font-bold text-[#003580] bg-white rounded-lg shadow-sm border-2 border-[#003580] hover:bg-blue-50 transition-all"
                                     >
                                         <History size={20}/> View Full History
                                     </button>
-                                    <button
-                                        onClick={() => setIsDataModalOpen(true)}
-                                        className="w-full flex justify-center items-center gap-3 px-6 py-3 text-base font-bold text-slate-700 bg-white rounded-lg shadow-sm border border-slate-300 hover:bg-slate-50 transition-all"
-                                    >
-                                        <Database size={20}/> Manage Data
-                                    </button>
+                                    {canManageData && (
+                                        <button
+                                            onClick={() => setIsDataModalOpen(true)}
+                                            className="w-full flex justify-center items-center gap-3 px-6 py-3 text-base font-bold text-slate-700 bg-white rounded-lg shadow-sm border border-slate-300 hover:bg-slate-50 transition-all"
+                                        >
+                                            <Database size={20}/> Manage Data
+                                        </button>
+                                    )}
+                                    {!canCalculate && (
+                                        <p className="flex items-start gap-1.5 text-xs text-slate-400 pt-1">
+                                            <Eye size={13} className="mt-0.5 flex-shrink-0" />
+                                            <span>You have view-only access. The numbers above are the latest published run.</span>
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -183,13 +213,19 @@ export const DashboardPage: React.FC<DashboardProps> = (props) => {
                                             : "Upload your data files to get started."
                                         }
                                     </p>
-                                    <button
-                                        onClick={onGoToCalculator}
-                                        className="inline-flex justify-center items-center gap-3 px-6 py-3 text-base font-bold text-white bg-[#003580] rounded-lg shadow-md hover:bg-[#002a66] transition-all"
-                                    >
-                                        <Calculator size={20}/> 
-                                        {isReadyToCalculate ? 'Go to Calculator' : 'Upload Data'}
-                                    </button>
+                                    {canCalculate ? (
+                                        <button
+                                            onClick={onGoToCalculator}
+                                            className="inline-flex justify-center items-center gap-3 px-6 py-3 text-base font-bold text-white bg-[#003580] rounded-lg shadow-md hover:bg-[#002a66] transition-all"
+                                        >
+                                            <Calculator size={20}/>
+                                            {isReadyToCalculate ? 'Go to Calculator' : 'Upload Data'}
+                                        </button>
+                                    ) : (
+                                        <p className="text-sm text-slate-400">
+                                            Nothing has been published yet. The cane team runs the calculation each morning.
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </div>
