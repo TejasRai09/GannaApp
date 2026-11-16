@@ -893,9 +893,13 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                         <table className="w-full text-sm text-left">
                             <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase">
                                 <tr>
-                                    <th className="px-3 py-2 rounded-l-md">Date</th>
+                                    {/* These are DELIVERY days, not the days a calculation
+                                        was run. A run made on the 11th predicts for the 14th,
+                                        so a bare "Date" header made the table look as though
+                                        it contradicted itself. */}
+                                    <th className="px-3 py-2 rounded-l-md" title="The day the cane was wanted. The indent for it was placed three days earlier.">Delivery Date</th>
                                     <th className="px-3 py-2 text-right">Target</th>
-                                    <th className="px-3 py-2 text-right">Predicted Indent</th>
+                                    <th className="px-3 py-2 text-right" title="What the app recommended ordering for this delivery day, from the calculation run three days before it.">Predicted Indent</th>
                                     <th className="px-3 py-2 text-right">Actual Indent</th>
                                     <th className="px-3 py-2 text-right">Var %</th>
                                     <th className="px-3 py-2 text-right rounded-r-md">Cumul. Rate</th>
@@ -911,7 +915,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                                         <td className="px-3 py-2 text-right font-mono">
                                             {row.predicted
                                                 ? row.predicted.toLocaleString(undefined, {maximumFractionDigits: 0})
-                                                : <span className="text-slate-400 text-xs italic" title={`No calculation was run ${deliveryLagDays} days before this delivery day, so there is no recommendation to compare against.`}>not run</span>}
+                                                : <span className="text-slate-400 text-xs italic" title={`No calculation was run on ${formatDateGB(addDays(row.date, -deliveryLagDays))}, which is when the indent for this delivery day was placed.`}>not run</span>}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono font-semibold text-slate-800">
                                             {row.actual > 0 ? row.actual.toLocaleString() : <span className="text-slate-300">-</span>}
