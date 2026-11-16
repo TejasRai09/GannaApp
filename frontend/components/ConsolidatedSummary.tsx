@@ -317,7 +317,14 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
 
             if (selectedScope === 'all') {
                 historicTarget = historyRun ? historyRun.inputs.totalDailyRequirement : dailyTarget;
-                predictedIndent = historyRun ? historyRun.results.tableData.reduce((s, r) => s + r.indentToRaise, 0) : 0;
+                // Prefer the total stored with the run. The history list omits
+                // results_json because results are megabytes each, so tableData
+                // is empty for every run except the one currently open — which
+                // left this whole column showing a dash.
+                predictedIndent = historyRun
+                    ? (historyRun.totalIndent
+                        ?? historyRun.results.tableData.reduce((s, r) => s + r.indentToRaise, 0))
+                    : 0;
             } else {
                 if (historyRun) {
                     const centerRow = historyRun.results.tableData.find(r => r.centreId === selectedScope);
@@ -328,6 +335,9 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                 }
             }
 
+            // Guard the divide: a run whose per-centre detail is not loaded has
+            // no prediction to compare against, and 0 would read as "no variance"
+            // rather than "not known".
             const variance = (predictedIndent > 0) ? (actualIndent - predictedIndent) / predictedIndent : 0;
 
             performanceTableData.push({
