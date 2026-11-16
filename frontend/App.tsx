@@ -192,7 +192,17 @@ const AppContent: React.FC = () => {
             setPurchaseData(parseFile('purchase'));
             setYardBalanceData(parseFile('yard_balance'));
             const runs = (calcResp.runs || []).map(mapCalculationRun);
-            setCalculationHistory(runs);
+            // MERGE, do not overwrite. These runs come from the list endpoint,
+            // which omits results_json, so they all carry an empty results
+            // object. If this runs again after a run's detail has been fetched
+            // — and it does, whenever the effect that calls it re-fires — it
+            // would wipe those results, and the fetch guard, having already
+            // recorded an attempt, would refuse to fetch them again. The
+            // dashboard then sat empty until it timed out.
+            setCalculationHistory(prev => runs.map((fresh: CalculationRun) => {
+                const existing = prev.find(r => r.id === fresh.id);
+                return (existing?.results?.tableData?.length ?? 0) > 0 ? existing! : fresh;
+            }));
 
             setSupportTickets((ticketResp.tickets || []).map(mapTicket));
         } catch (e: any) {
@@ -341,6 +351,10 @@ const AppContent: React.FC = () => {
         const hasHeavy = (target.results?.maturityAnalysisPurchases?.length ?? 0) > 0;
         if (hasTable && (!wantFull || hasHeavy)) return;
 
+        // The guard marks a fetch as IN FLIGHT, not as "ever attempted". If the
+        // results are wiped later for any reason, this must be able to fetch
+        // them again rather than leaving the dashboard permanently empty —
+        // which is exactly what a stale "already tried" flag caused.
         fetchedRunIds.current.add(fetchKey);
         fetchCalculation(token, displayedRunId, !wantFull)
             .then(resp => {
@@ -349,10 +363,8 @@ const AppContent: React.FC = () => {
                     setCalculationHistory(prev => prev.map(r => r.id === displayedRunId ? loaded : r));
                 }
             })
-            .catch(() => {
-                // Allow a later attempt rather than caching the failure.
-                fetchedRunIds.current.delete(fetchKey);
-            });
+            .catch(() => undefined)
+            .finally(() => { fetchedRunIds.current.delete(fetchKey); });
     }, [displayedRunId, fetchKey, wantFull, token, calculationHistory, mapCalculationRun]);
     
     const openDataGridModal = (dataType: DataType) => {
