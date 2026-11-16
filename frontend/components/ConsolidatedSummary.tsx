@@ -314,6 +314,39 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
         const centerBondingQty = centerBonding ? parseFloat(getValue(centerBonding, ['Bonding'])) : 0;
 
         const cumulativeRunRate = totalSeasonPurchases / daysLapsed;
+
+        /**
+         * Cane received per day over the last seven days with data.
+         *
+         * The cumulative average is still needed below, to work out what is
+         * left to crush, but it is a poor description of how the mill is
+         * running now: it carries the whole ramp-up forever. It read 66,350
+         * while the mill was actually taking around 90,000 a day, and it would
+         * have taken weeks to catch up. The recent rate is what anyone looking
+         * at this screen actually wants to know.
+         */
+        const recentRunRate = (() => {
+            let latest: Date | null = null;
+            for (const row of purchaseData.data) {
+                if (selectedScope !== 'all' && getValue(row, ['Code']).trim() !== selectedScope) continue;
+                const d = parseDate(getValue(row, ['Purchase Date']));
+                if (d && (!latest || d > latest)) latest = d;
+            }
+            if (!latest) return null;
+            const from = addDays(latest, -6);   // seven days inclusive
+            let qty = 0;
+            for (const row of purchaseData.data) {
+                if (selectedScope !== 'all' && getValue(row, ['Code']).trim() !== selectedScope) continue;
+                const d = parseDate(getValue(row, ['Purchase Date']));
+                if (d && d >= from && d <= latest) {
+                    qty += parseFloat(getValue(row, ['Qty in Qtls', 'Qty'])) || 0;
+                }
+            }
+            // Early in the season there may be fewer than seven days of data.
+            const days = Math.max(1, Math.min(7, daysBetween(plantStartDate, latest) + 1));
+            return { rate: qty / days, days, latest };
+        })();
+
         const remainingDays = Math.max(1, seasonTotalDays - daysLapsed);
         const remainingQtyNeeded = Math.max(0, seasonalCrushingCapacity - totalSeasonPurchases);
         const netRequiredRunRate = remainingQtyNeeded / remainingDays;
@@ -324,6 +357,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
             daysLapsed,
             totalDays: seasonTotalDays,
             cumulativeRunRate,
+            recentRunRate,
             netRequiredRunRate,
             totalSeasonPurchases,
             globalSeasonPurchases, 
@@ -819,9 +853,16 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                             </p>
                         </div>
                         <div className="pl-8 border-l border-blue-800">
-                            <p className="text-xs uppercase tracking-wider text-blue-300 mb-1">Cumulative Rate</p>
-                            <p className="text-2xl font-bold font-mono">{fmtInt(seasonStats.cumulativeRunRate)}</p>
-                            <p className="text-[10px] text-blue-300">Avg. Daily Purchase</p>
+                            <p className="text-xs uppercase tracking-wider text-blue-300 mb-1">Current Rate</p>
+                            <p className="text-2xl font-bold font-mono">
+                                {fmtInt(seasonStats.recentRunRate ? seasonStats.recentRunRate.rate : null)}
+                            </p>
+                            <p className="text-[10px] text-blue-300"
+                               title={`Season average is ${fmtInt(seasonStats.cumulativeRunRate)}/day, but that still carries the ramp-up and understates how the mill is running now.`}>
+                                {seasonStats.recentRunRate
+                                    ? `Last ${seasonStats.recentRunRate.days} days · season avg ${fmtInt(seasonStats.cumulativeRunRate)}`
+                                    : 'Avg. Daily Purchase'}
+                            </p>
                         </div>
                         <div className="pl-8 border-l border-blue-800">
                             {selectedScope === 'all' ? (
