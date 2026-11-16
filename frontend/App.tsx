@@ -109,15 +109,23 @@ const AppContent: React.FC = () => {
     }), []);
 
     const mapCalculationRun = useCallback((r: any): CalculationRun => {
+        /**
+         * A JSON column reaches us either already parsed, as an object, or as
+         * a string, depending on how the driver handled it.
+         *
+         * The object case has to be checked BEFORE any toString fallback.
+         * Every object has toString, so an earlier version fell into that
+         * branch, produced "[object Object]", failed to parse it and returned
+         * { raw: "[object Object]" } — silently discarding the entire run.
+         * That emptied the dashboard while the API was returning perfect data.
+         */
         const safeParse = (val: any) => {
             if (val === null || val === undefined) return {};
             if (typeof val === 'string') {
-                try { return JSON.parse(val); } catch { return { raw: val }; }
+                try { return JSON.parse(val); } catch { return {}; }
             }
-            if (val?.toString) {
-                try { return JSON.parse(val.toString()); } catch { return { raw: val.toString() }; }
-            }
-            return val;
+            if (typeof val === 'object') return val;
+            return {};
         };
         const ensureArray = (v: any) => (Array.isArray(v) ? v : []);
 
@@ -154,7 +162,6 @@ const AppContent: React.FC = () => {
     const loadOrgData = useCallback(async () => {
         if (!currentUser || currentUser.role === 'superadmin' || !token) return;
         try {
-            console.log('[loadOrgData] start');
             const [dataResp, calcResp, ticketResp] = await Promise.all([
                 fetchOrgData(token),
                 fetchCalculations(token),
@@ -162,21 +169,20 @@ const AppContent: React.FC = () => {
             ]);
 
             const files = dataResp.files || [];
-            console.log('[loadOrgData] files', files.length, files[0]);
+            // Same shape trap as safeParse: check the already-parsed cases
+            // before any toString fallback, because every object has toString
+            // and "[object Object]" is not valid JSON.
             const parseJson = (val: any) => {
                 if (!val) return [];
                 if (Array.isArray(val)) return val;
-                try {
-                    if (typeof val === 'string') return JSON.parse(val);
-                    if (val?.toString) return JSON.parse(val.toString());
-                } catch (_) {
-                    return [];
+                if (typeof val === 'string') {
+                    try { return JSON.parse(val); } catch { return []; }
                 }
+                if (typeof val === 'object') return val;
                 return [];
             };
             const parseFile = (kind: string) => {
                 const f = files.find((x: any) => x.data_type === kind.toUpperCase());
-                console.log('[loadOrgData] parseFile', kind, f ? { id: f.id, data_type: f.data_type, file_name: f.file_name, has_data_json: !!f.data_json } : 'missing');
                 if (!f) return null;
                 const parsed = parseJson(f.data ?? f.data_json);
                 return { fileName: f.file_name || kind, lastUpdated: f.last_updated || new Date().toISOString(), data: parsed } as StoredData<any>;
@@ -185,8 +191,6 @@ const AppContent: React.FC = () => {
             setIndentData(parseFile('indent'));
             setPurchaseData(parseFile('purchase'));
             setYardBalanceData(parseFile('yard_balance'));
-
-            console.log('[loadOrgData] calc runs len', calcResp?.runs?.length, 'sample', calcResp?.runs?.[0]);
             const runs = (calcResp.runs || []).map(mapCalculationRun);
             setCalculationHistory(runs);
 
