@@ -52,7 +52,7 @@ export const TeamManagementPage: React.FC<TeamManagementPageProps> = ({ onNaviga
     const [newUserName, setNewUserName] = useState('');
     const [newUserEmail, setNewUserEmail] = useState('');
     const [newUserPassword, setNewUserPassword] = useState('');
-    const [newUserRole, setNewUserRole] = useState<UserRole>('user');
+    const [newUserRole, setNewUserRole] = useState<UserRole>('viewer');
     const [error, setError] = useState('');
 
     const handleDeleteUser = (userId: string) => {
@@ -80,7 +80,7 @@ export const TeamManagementPage: React.FC<TeamManagementPageProps> = ({ onNaviga
         setNewUserName('');
         setNewUserEmail('');
         setNewUserPassword('');
-        setNewUserRole('user');
+        setNewUserRole('viewer');
     };
 
     return (
@@ -139,8 +139,9 @@ export const TeamManagementPage: React.FC<TeamManagementPageProps> = ({ onNaviga
                                 <div>
                                     <label htmlFor="tm-role" className="text-sm font-medium text-slate-700">Role</label>
                                     <select id="tm-role" value={newUserRole} onChange={e => setNewUserRole(e.target.value as UserRole)} className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
-                                        <option value="user">User</option>
-                                        <option value="viewer">Viewer</option>
+                                        <option value="viewer">Viewer — read only</option>
+                                        <option value="auditor">Auditor — runs the calculation</option>
+                                        <option value="admin">Admin — manages users and the log</option>
                                     </select>
                                 </div>
                                 <button type="submit" className="w-full flex justify-center items-center gap-2 px-4 py-2 bg-[#003580] text-white font-semibold rounded-lg hover:bg-[#002a66]"><Plus size={18}/> Add Member</button>

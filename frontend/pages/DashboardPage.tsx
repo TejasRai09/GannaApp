@@ -6,6 +6,7 @@ import { CheckCircle, Info, Calculator, History, Newspaper, Database, AlertCircl
 import { useAuth } from '../context/AuthContext';
 import { can } from '../services/permissions';
 import { ConsolidatedSummary } from '../components/ConsolidatedSummary';
+import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import { Header } from '../components/common/Header';
 import { DataManagerModal } from '../components/DataManagerModal';
 import { DataGridModal } from '../components/DataGridModal';
@@ -117,6 +118,7 @@ export const DashboardPage: React.FC<DashboardProps> = (props) => {
                     )}
 
                     {calculationHistory.length > 0 && (
+                        <ErrorBoundary section="Mission Control">
                         <ConsolidatedSummary
                             orgSeasonStartDate={props.orgSeasonStartDate}
                             deliveryLagDays={props.deliveryLagDays}
@@ -127,6 +129,7 @@ export const DashboardPage: React.FC<DashboardProps> = (props) => {
                             seasonTotalDays={seasonTotalDays}
                             seasonalCrushingCapacity={seasonalCrushingCapacity}
                         />
+                        </ErrorBoundary>
                     )}
                     
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

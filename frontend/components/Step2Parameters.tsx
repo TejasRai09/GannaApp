@@ -35,7 +35,10 @@ interface Step2ParametersProps {
     onEditAssumptions: () => void;
     // Constraints
     constraints: Constraint[];
-    setConstraints: (constraints: Constraint[]) => void;
+    // React's state setter, so an updater function is valid here. The
+    // narrower signature was a type error that only surfaced once @types/react
+    // was installed; the runtime was always correct.
+    setConstraints: React.Dispatch<React.SetStateAction<Constraint[]>>;
 }
 
 const InputField: React.FC<{ label: string; id: string; type: string; value: string | number; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; readOnly?: boolean; unit?: string; min?: number; max?: number, tooltip?: string }> = 

@@ -108,7 +108,10 @@ const SupportTicketForm: React.FC<{ onRaiseTicket: HelpPageProps['onRaiseTicket'
 
 export const HelpPage: React.FC<HelpPageProps> = ({ onNavigate, onLogout, onRaiseTicket }) => {
     const { currentUser } = useAuth();
-    const canRaiseTicket = currentUser?.role === 'admin' || currentUser?.role === 'user';
+    // 'user' was renamed; anyone signed in may raise a ticket, which is the
+    // behaviour this was reaching for before the rename left it comparing
+    // against a role that no longer exists.
+    const canRaiseTicket = Boolean(currentUser);
     const [activeSection, setActiveSection] = useState<Section>(canRaiseTicket ? 'support' : 'faq');
 
     const SidebarLink: React.FC<{ sectionId: Section, title: string, icon: React.ReactNode }> = ({ sectionId, title, icon }) => (

@@ -377,10 +377,20 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
             if (selectedScope !== 'all' && centerData.centreId !== selectedScope) return;
 
             centerData.data.forEach(row => {
-                const key = row.indentDate.toISOString();
+                // A run reloaded from the database has been through JSON, so
+                // every date in it is a STRING, not a Date. Calling
+                // toISOString() on it throws and takes the whole page down.
+                // Live, in-memory runs still carry real Dates, so this has to
+                // cope with both.
+                const indentDate = row.indentDate instanceof Date
+                    ? row.indentDate
+                    : new Date(row.indentDate as any);
+                if (isNaN(indentDate.getTime())) return;
+
+                const key = indentDate.toISOString();
                 if (!aggregatedMatrix.has(key)) {
                     aggregatedMatrix.set(key, {
-                        indentDate: row.indentDate,
+                        indentDate,
                         indentQty: 0,
                         arrivedQty: 0,
                         d1: { qty: 0, type: 'Actual' },
@@ -393,7 +403,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                 aggRow.indentQty += row.indentQty;
 
                 row.entries.forEach(entry => {
-                    const dayDiff = Math.round((new Date(entry.purchaseDate).getTime() - new Date(row.indentDate).getTime()) / (1000 * 3600 * 24));
+                    const dayDiff = Math.round((new Date(entry.purchaseDate).getTime() - indentDate.getTime()) / (1000 * 3600 * 24));
                     
                     if (entry.type === 'Actual') {
                         aggRow.arrivedQty += entry.quantity;
@@ -418,7 +428,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
 
         for (let i = -3; i <= 3; i++) {
             const loopDate = addDays(currentDate, i);
-            const issueDate = addDays(loopDate, -3);
+            const issueDate = addDays(loopDate, -deliveryLagDays);
             const isForecastRow = i === 3;
             
             let status: 'Fully Open' | 'Partially Open' | 'Closed' | 'Recommendation' = 'Partially Open';
