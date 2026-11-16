@@ -1,9 +1,9 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import type { CalculationRun, StoredData, Indent, Purchase, Bonding } from '../types';
 import { TrendChart } from './TrendChart';
 import { parseDate, addDays, daysBetween, isSameDay, formatDateGB } from '../services/dateUtils';
-import { TrendingUp, ClipboardCheck, Lightbulb, BarChart3, Target, Activity, Search, Waves, AlertCircle, AlertTriangle, Clock, Filter, PieChart } from 'lucide-react';
+import { Loader2, TrendingUp, ClipboardCheck, Lightbulb, BarChart3, Target, Activity, Search, Waves, AlertCircle, AlertTriangle, Clock, Filter, PieChart } from 'lucide-react';
 import { InfoIcon } from './InfoIcon';
 
 interface ConsolidatedSummaryProps {
@@ -761,6 +761,58 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
         return data;
     }, [fieldBehaviorData, behaviorRange, isBehaviorSmoothed, seasonStats]);
 
+
+    /**
+     * The run's detail arrives AFTER the data files do.
+     *
+     * The list endpoint omits results_json for speed, so a run reaches this
+     * component with an empty results object and its detail is fetched a beat
+     * later. Rendering during that gap drew a half-built dashboard: delivery
+     * rate present, because it comes from the raw files, but recommendations
+     * at zero and every run-derived metric blank. It looked broken, and the
+     * numbers it showed were wrong rather than merely missing.
+     *
+     * So hold the whole panel until the run is actually here. A spinner is
+     * honest; a zero is not.
+     */
+    const runStillLoading =
+        calculationHistory.length > 0
+        && ((calculationHistory[0].results?.tableData?.length ?? 0) === 0);
+
+    // A spinner that never ends is worse than a wrong number, so give up after
+    // a while and say so. Covers both a failed fetch and a run that genuinely
+    // has no detail stored.
+    const [loadTimedOut, setLoadTimedOut] = useState(false);
+    useEffect(() => {
+        if (!runStillLoading) { setLoadTimedOut(false); return; }
+        const t = setTimeout(() => setLoadTimedOut(true), 20000);
+        return () => clearTimeout(t);
+    }, [runStillLoading, calculationHistory[0]?.id]);
+
+    if (runStillLoading && loadTimedOut) {
+        return (
+            <div className="bg-white p-8 rounded-xl shadow-md text-center">
+                <AlertTriangle size={24} className="mx-auto text-amber-500 mb-2" />
+                <h3 className="text-lg font-bold text-slate-800">Could not load the latest calculation</h3>
+                <p className="text-slate-500 text-sm mt-1 max-w-md mx-auto">
+                    The figures are saved and intact — this is a loading problem, not a data one.
+                    Reload the page to try again.
+                </p>
+            </div>
+        );
+    }
+
+    if (runStillLoading) {
+        return (
+            <div className="bg-white p-10 rounded-xl shadow-md text-center">
+                <Loader2 size={26} className="mx-auto text-[#003580] mb-3 animate-spin" />
+                <h3 className="text-lg font-bold text-slate-800">Loading the latest calculation…</h3>
+                <p className="text-slate-500 text-sm mt-1">
+                    Fetching {calculationHistory[0].name}.
+                </p>
+            </div>
+        );
+    }
 
     if (!latestCalculation || !snapshotData || !seasonStats || !scopeMetrics) {
         return (
