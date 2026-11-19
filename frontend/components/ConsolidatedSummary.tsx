@@ -420,10 +420,13 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                 }
             }
 
-            // Guard the divide: a run whose per-centre detail is not loaded has
-            // no prediction to compare against, and 0 would read as "no variance"
-            // rather than "not known".
-            const variance = (predictedIndent > 0) ? (actualIndent - predictedIndent) / predictedIndent : 0;
+            // Variance needs BOTH sides. An unknown actual is not a zero actual:
+            // treating it as one produced a confident -100.0%, which reads as
+            // "we ordered nothing" when the truth is "the order is not in the
+            // uploaded file yet".
+            const variance = (predictedIndent > 0 && actualIndent > 0)
+                ? (actualIndent - predictedIndent) / predictedIndent
+                : null;
 
             performanceTableData.push({
                 date,
@@ -1027,9 +1030,15 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                                             {row.actual > 0 ? row.actual.toLocaleString() : <span className="text-slate-300">-</span>}
                                         </td>
                                         <td className={`px-3 py-2 text-right font-bold text-xs ${row.variance === 0 ? 'text-slate-300' : row.variance > 0 ? 'text-orange-600' : 'text-blue-600'}`}>
-                                            {row.variance !== 0 ? (row.variance > 0 ? '+' : '') + (row.variance * 100).toFixed(1) + '%' : '-'}
+                                            {row.variance === null || row.variance === undefined
+                                                ? <span className="text-slate-300" title="The indent for this delivery day is not in the uploaded file yet.">-</span>
+                                                : (row.variance > 0 ? '+' : '') + (row.variance * 100).toFixed(1) + '%'}
                                         </td>
-                                        <td className="px-3 py-2 text-right font-mono text-slate-600">{Math.round(row.cumulativeRate).toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right font-mono text-slate-600">
+                                            {row.cumulativeRate > 0
+                                                ? Math.round(row.cumulativeRate).toLocaleString()
+                                                : <span className="text-slate-300" title="No purchases recorded between the season start and this day.">-</span>}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
