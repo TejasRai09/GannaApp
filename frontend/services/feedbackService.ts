@@ -112,6 +112,8 @@ export interface Scorecard {
     total_rows: number;
     with_ordered: number;
     with_arrived: number;
+    /** Delivery days held back because their cane is still arriving. */
+    days_still_arriving: number;
   };
 }
 

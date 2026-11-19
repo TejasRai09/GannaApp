@@ -360,13 +360,29 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
 
     // Every denominator is forced positive, so no row can contribute a NULL or
     // a division by zero to the sums.
+    // A delivery day is only comparable once its cane has FINISHED arriving.
+    // Cane lands over four days (D1 to D4), so a day is settled three days
+    // after the delivery date. Including an unsettled day compares a complete
+    // order against partial arrivals and makes both sides look catastrophic:
+    // 17 November showed 532 qtl arrived against 47,682 ordered, purely
+    // because the purchase file stopped at the 16th.
+    //
+    // The cut-off is derived from the data rather than from today's date,
+    // because the files usually lag: the newest delivery day that has any
+    // arrivals at all marks how far the purchase data reaches.
+    const settledCutoff = `
+      (SELECT DATE_SUB(MAX(l2.delivery_date), INTERVAL 3 DAY)
+         FROM indent_ledger l2
+        WHERE l2.org_id = ? AND l2.actual_arrival > 0)`;
+
     const scope = `
       FROM indent_ledger
      WHERE org_id = ? AND delivery_date BETWEEN ? AND ?
        AND requirement    > 0
        AND app_indent     IS NOT NULL
        AND actual_indent  > 0
-       AND actual_arrival IS NOT NULL`;
+       AND actual_arrival IS NOT NULL
+       AND delivery_date <= ${settledCutoff}`;
 
     // The app's counterfactual arrival, at the yield actually observed.
     const appArrived = '(app_indent * (actual_arrival / actual_indent))';
@@ -382,7 +398,7 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
     // ── Day totals: the unit the verdict rests on ──
     const [byDayRaw]: any = await pool.query(
       `SELECT delivery_date, ${sums} ${scope} GROUP BY delivery_date ORDER BY delivery_date DESC`,
-      [user.orgId, from, to]
+      [user.orgId, from, to, user.orgId]
     );
 
     const n = (v: any): number => (v === null || v === undefined ? 0 : Number(v));
@@ -445,7 +461,7 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
       `SELECT centre_id, centre_name, is_gate, ${sums} ${scope}
         GROUP BY centre_id, centre_name, is_gate
         ORDER BY SUM(requirement) DESC`,
-      [user.orgId, from, to]
+      [user.orgId, from, to, user.orgId]
     );
 
     const byCentre = byCentreRaw.map((c: any) => {
@@ -473,10 +489,12 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
       `SELECT COUNT(DISTINCT delivery_date)                        AS total_days,
               COUNT(*)                                             AS total_rows,
               SUM(actual_indent IS NOT NULL AND actual_indent > 0) AS with_ordered,
-              SUM(actual_arrival IS NOT NULL)                      AS with_arrived
+              SUM(actual_arrival IS NOT NULL)                      AS with_arrived,
+              COUNT(DISTINCT CASE WHEN delivery_date > ${settledCutoff}
+                                  THEN delivery_date END)          AS days_still_arriving
          FROM indent_ledger
         WHERE org_id = ? AND delivery_date BETWEEN ? AND ?`,
-      [user.orgId, from, to]
+      [user.orgId, user.orgId, from, to]
     );
 
     res.json({ ok: true, overall: totals, byDay, byCentre, coverage: coverage[0] });

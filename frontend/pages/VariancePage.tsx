@@ -161,6 +161,22 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
                     </div>
                 )}
 
+                {/* A day held back is not missing data, and saying so stops it
+                    looking like one. */}
+                {cov && Number(cov.days_still_arriving) > 0 && (
+                    <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-sm">
+                        <Info size={15} className="mt-0.5 flex-shrink-0" />
+                        <span>
+                            <strong>{cov.days_still_arriving} recent delivery day
+                            {Number(cov.days_still_arriving) === 1 ? '' : 's'} not yet scored.</strong>{' '}
+                            Cane keeps arriving for about four days after a delivery date, so a day is
+                            only comparable once that window has closed. Scoring one early compares a
+                            full order against part of its cane and makes both sides look far worse
+                            than they are.
+                        </span>
+                    </div>
+                )}
+
                 {/* How it is measured — stated on the page, not hidden in a tooltip. */}
                 <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 text-xs leading-relaxed">
                     <Target size={15} className="mt-0.5 flex-shrink-0 text-slate-400" />
