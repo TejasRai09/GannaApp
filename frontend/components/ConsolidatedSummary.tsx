@@ -800,6 +800,42 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
         return () => clearTimeout(t);
     }, [runStillLoading, calculationHistory[0]?.id]);
 
+    // A cleared file is not a missing file: { data: [] } passes every guard
+    // above and then silently zeroes everything derived from it. Bonding was
+    // wiped this morning and the only visible symptom was GATE INDENT 0.
+    const emptyDatasets = [
+        { label: 'Bonding', rows: bondingData?.data?.length ?? 0,
+          effect: 'the gate cannot be identified and centre shares cannot be worked out' },
+        { label: 'Indent', rows: indentData?.data?.length ?? 0,
+          effect: 'no orders can be matched to deliveries' },
+        { label: 'Purchase', rows: purchaseData?.data?.length ?? 0,
+          effect: 'no arrivals or delivery rates can be measured' },
+    ].filter(x => x.rows === 0);
+
+    if (emptyDatasets.length > 0) {
+        return (
+            <div className="m-1 p-5 rounded-xl bg-red-50 border border-red-300 text-red-900">
+                <div className="flex items-start gap-2.5">
+                    <AlertTriangle size={18} className="mt-0.5 flex-shrink-0" />
+                    <div>
+                        <p className="font-bold">
+                            {emptyDatasets.map(x => x.label).join(' and ')} data is missing
+                        </p>
+                        <p className="text-sm mt-1">
+                            The file was cleared or never uploaded, so{' '}
+                            {emptyDatasets.map(x => x.effect).join(', and ')}. Figures on this page
+                            would read zero rather than be unavailable, so they are held back.
+                        </p>
+                        <p className="text-sm mt-2">
+                            Upload it again under <strong>Manage Data</strong>, then run the
+                            calculation.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     if (runStillLoading && loadTimedOut) {
         return (
             <div className="bg-white p-8 rounded-xl shadow-md text-center">

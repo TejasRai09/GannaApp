@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { pool } from '../db';
 import { requireAuth, AuthRequest, requireRole } from '../middleware/authMiddleware';
+import { auditFromReq } from '../services/auditLog';
 
 const router = Router();
 
@@ -70,6 +71,15 @@ router.post('/:type', requireAuth, requireRole('auditor'), async (req: AuthReque
          data_json = VALUES(data_json)`,
       [orgId, dataType, fileName, dataJson]
     );
+
+    // Uploading or clearing source data is destructive and was previously
+    // invisible: bonding and the yard file were both wiped with nothing in the
+    // log to say who did it or when.
+    const rowCount = Array.isArray(data) ? data.length : 0;
+    await auditFromReq(req, rowCount === 0 ? 'data_cleared' : 'data_uploaded', {
+      entity: dataType,
+      detail: { fileName, rows: rowCount },
+    });
 
     res.json({ ok: true });
   } catch (err) {
