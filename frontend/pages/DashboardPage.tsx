@@ -158,14 +158,12 @@ export const DashboardPage: React.FC<DashboardProps> = (props) => {
                                     >
                                         <BarChart3 size={20}/> Variance &amp; Scorecard
                                     </button>
-                                    {canCalculate && (
-                                        <button
-                                            onClick={() => onNavigate('history')}
-                                            className="w-full flex justify-center items-center gap-3 px-6 py-3 text-base font-bold text-[#003580] bg-white rounded-lg shadow-sm border-2 border-[#003580] hover:bg-blue-50 transition-all"
-                                        >
-                                            <History size={20}/> View Full History
-                                        </button>
-                                    )}
+                                    <button
+                                        onClick={() => onNavigate('history')}
+                                        className="w-full flex justify-center items-center gap-3 px-6 py-3 text-base font-bold text-[#003580] bg-white rounded-lg shadow-sm border-2 border-[#003580] hover:bg-blue-50 transition-all"
+                                    >
+                                        <History size={20}/> View Full History
+                                    </button>
                                     {canManageData && (
                                         <button
                                             onClick={() => setIsDataModalOpen(true)}

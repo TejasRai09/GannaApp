@@ -108,6 +108,19 @@ const AppContent: React.FC = () => {
         status: (t.status || 'open') as SupportTicketStatus,
     }), []);
 
+    /**
+     * Newest first by the day the run was FOR, not the day the row was written.
+     * A run reconstructed today for an earlier delivery day belongs in its own
+     * place in the season, not at the top of the list.
+     */
+    const byRunDate = (runs: CalculationRun[]): CalculationRun[] => {
+        const key = (r: CalculationRun) => {
+            const d = new Date((r.inputs as any)?.currentDate ?? 0).getTime();
+            return Number.isFinite(d) && d > 0 ? d : r.timestamp;
+        };
+        return [...runs].sort((a, b) => key(b) - key(a) || b.timestamp - a.timestamp);
+    };
+
     const mapCalculationRun = useCallback((r: any): CalculationRun => {
         /**
          * A JSON column reaches us either already parsed, as an object, or as
@@ -199,10 +212,10 @@ const AppContent: React.FC = () => {
             // would wipe those results, and the fetch guard, having already
             // recorded an attempt, would refuse to fetch them again. The
             // dashboard then sat empty until it timed out.
-            setCalculationHistory(prev => runs.map((fresh: CalculationRun) => {
+            setCalculationHistory(prev => byRunDate(runs.map((fresh: CalculationRun) => {
                 const existing = prev.find(r => r.id === fresh.id);
                 return (existing?.results?.tableData?.length ?? 0) > 0 ? existing! : fresh;
-            }));
+            })));
 
             setSupportTickets((ticketResp.tickets || []).map(mapTicket));
         } catch (e: any) {
@@ -310,7 +323,7 @@ const AppContent: React.FC = () => {
                         return (existing?.results?.tableData?.length ?? 0) > 0 ? existing! : nr;
                     });
                     const memoryOnly = prev.filter(r => !newIds.has(r.id));
-                    return [...merged, ...memoryOnly];
+                    return byRunDate([...merged, ...memoryOnly]);
                 });
             } catch (e: any) {
                 setError(e?.message || 'Failed to load history');
@@ -934,9 +947,6 @@ const AppContent: React.FC = () => {
         return <BrandingPage onNavigate={navigate} onLogout={handleLogout} onUpdateBranding={handleUpdateBranding} />;
     }
     if (page === 'calculator' && !can.calculate(role)) return denied('the calculator');
-    // History exposes every past run and its inputs, which is working
-    // material rather than something to publish to the whole directory.
-    if (page === 'history' && !can.viewHistory(role)) return denied('calculation history');
     
     if (page === 'dashboard') {
         return <DashboardPage
