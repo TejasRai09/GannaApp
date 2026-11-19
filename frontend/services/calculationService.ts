@@ -95,7 +95,7 @@ const normalizePurchases = (data: any[], centerMapping: { [key: string]: string 
 };
 
 const normalizeBonding = (data: any[], centerMapping: { [key: string]: string }, gatePattern = 'GATE'): NormalizedBonding[] => {
-    const bondingByCenter = new Map<string, { name: string; qty: number }>();
+    const bondingByCenter = new Map<string, { name: string; qty: number; isGate: boolean }>();
     data.forEach(row => {
         const originalId = findValue(row, ['Code'])?.trim();
         if (!originalId) return;
@@ -106,8 +106,17 @@ const normalizeBonding = (data: any[], centerMapping: { [key: string]: string },
         const qty = parseFloat(qtyStr || '0');
 
         if (id && name && qty > 0) {
-            const existing = bondingByCenter.get(id) || { name, qty: 0 };
+            const existing = bondingByCenter.get(id) || { name, qty: 0, isGate: false };
             existing.qty += qty;
+            // Gate-ness is a property of EVERY row folded into this centre, not
+            // of whichever name happened to be read first. The mill maps six
+            // "GATE (…)" collection points into code 1; when code 1 was itself
+            // renamed from "GATE" to "Mill A1", the first name stopped matching
+            // and the mill gate silently stopped being treated as a gate —
+            // taking the gate yard-stock standard and the GATE recommendation
+            // with it.
+            existing.isGate = existing.isGate
+                || name.toUpperCase().trim().includes(gatePattern.toUpperCase().trim());
             bondingByCenter.set(id, existing);
         }
     });
@@ -115,7 +124,7 @@ const normalizeBonding = (data: any[], centerMapping: { [key: string]: string },
         centreId,
         centreName: data.name,
         qty: data.qty,
-        isGate: data.name.toUpperCase().trim().includes(gatePattern.toUpperCase().trim()),
+        isGate: data.isGate,
     }));
 };
 
