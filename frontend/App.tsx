@@ -934,6 +934,9 @@ const AppContent: React.FC = () => {
         return <BrandingPage onNavigate={navigate} onLogout={handleLogout} onUpdateBranding={handleUpdateBranding} />;
     }
     if (page === 'calculator' && !can.calculate(role)) return denied('the calculator');
+    // History exposes every past run and its inputs, which is working
+    // material rather than something to publish to the whole directory.
+    if (page === 'history' && !can.viewHistory(role)) return denied('calculation history');
     
     if (page === 'dashboard') {
         return <DashboardPage

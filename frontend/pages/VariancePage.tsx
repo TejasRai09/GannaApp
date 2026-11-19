@@ -128,9 +128,15 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                             <BarChart3 size={22} /> Variance &amp; Scorecard
+                            <span
+                                className="text-slate-300 hover:text-slate-500 cursor-help"
+                                title="Both orders are measured against the requirement. The app's order is scored at the delivery rate actually observed that day, so conditions affect both sides equally and only the ordering decision is left."
+                            >
+                                <Target size={15} />
+                            </span>
                         </h1>
                         <p className="text-sm text-slate-500 mt-0.5">
-                            Whose indent would have met the requirement more closely — yours, or the app's.
+                            Whose indent met the requirement more closely.
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -161,34 +167,18 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
                     </div>
                 )}
 
-                {/* A day held back is not missing data, and saying so stops it
-                    looking like one. */}
+                {/* The explanation belongs on hover, not down the page. */}
                 {cov && Number(cov.days_still_arriving) > 0 && (
-                    <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-sm">
-                        <Info size={15} className="mt-0.5 flex-shrink-0" />
-                        <span>
-                            <strong>{cov.days_still_arriving} recent delivery day
-                            {Number(cov.days_still_arriving) === 1 ? '' : 's'} not yet scored.</strong>{' '}
-                            Cane keeps arriving for about four days after a delivery date, so a day is
-                            only comparable once that window has closed. Scoring one early compares a
-                            full order against part of its cane and makes both sides look far worse
-                            than they are.
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <Info size={13} className="flex-shrink-0 text-slate-400" />
+                        <span
+                            title="Cane keeps arriving for about four days after a delivery date. A day is only comparable once that window has closed; scoring it early compares a full order against part of its cane."
+                            className="border-b border-dotted border-slate-300 cursor-help"
+                        >
+                            {cov.days_still_arriving} recent day{Number(cov.days_still_arriving) === 1 ? '' : 's'} still arriving
                         </span>
                     </div>
                 )}
-
-                {/* How it is measured — stated on the page, not hidden in a tooltip. */}
-                <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 text-xs leading-relaxed">
-                    <Target size={15} className="mt-0.5 flex-shrink-0 text-slate-400" />
-                    <span>
-                        The <strong>requirement</strong> is the target both are measured against. You ordered
-                        a quantity and a quantity arrived — that is your result. The app's order is scored at
-                        the <strong>same delivery rate actually observed that day</strong>, so weather, roads
-                        and labour affect both sides equally and only the ordering decision is left.
-                        {' '}This assumes a centre's delivery rate does not change with the size of the order;
-                        over a normal range that holds, at extremes it would not.
-                    </span>
-                </div>
 
                 {/* Headline */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
@@ -242,7 +232,7 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
                             <span>
                                 {scoredDays === 0
                                     ? 'No day in this period has both an order and its arrivals yet. Rows appear here once the indent and purchase files for a delivery day have been uploaded.'
-                                    : `Only ${scoredDays} comparable day${scoredDays === 1 ? '' : 's'} so far. That is not evidence yet — treat it as a progress indicator, not a result.`}
+                                    : `${scoredDays} comparable day${scoredDays === 1 ? '' : 's'} so far — too few to call a result.`}
                             </span>
                         </div>
                     )}
@@ -252,10 +242,7 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
                 {score && score.byDay.length > 0 && (
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                         <h2 className="text-lg font-bold text-slate-900 mb-1">Day by day</h2>
-                        <p className="text-xs text-slate-500 mb-3">
-                            Each row is one delivery day, totalled across every centre. This is what the
-                            verdict above is built from.
-                        </p>
+                        <p className="text-xs text-slate-500 mb-3">One row per delivery day, all centres.</p>
                         <div className="overflow-auto max-h-[460px] border rounded-lg">
                             <table className="w-full text-sm text-left">
                                 <thead className="text-xs text-slate-600 uppercase bg-slate-50 sticky top-0 border-b">
@@ -301,11 +288,9 @@ export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
                 {score && score.byCentre.length > 0 && (
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                         <h2 className="text-lg font-bold text-slate-900 mb-1">By centre</h2>
-                        <p className="text-xs text-slate-500 mb-3">
-                            Diagnostic, not a verdict. The per-centre requirement is the app's own split of
-                            the mill total, which you never agreed to — so a centre looking short here may
-                            simply mean the app allocated it differently, not that anyone ordered badly.
-                            Useful for spotting a centre that consistently under-delivers.
+                        <p className="text-xs text-slate-500 mb-3"
+                           title="The per-centre requirement is the app's own split of the mill total, so a centre looking short may simply have been allocated differently. Useful for spotting consistent under-delivery.">
+                            Diagnostic only — the verdict above is built on day totals.
                         </p>
                         <div className="overflow-auto max-h-[420px] border rounded-lg">
                             <table className="w-full text-sm text-left">

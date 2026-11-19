@@ -151,14 +151,14 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
             {recordingOn && (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3 px-4 py-2.5 rounded-lg border text-sm bg-slate-50 border-slate-200">
                     <span className="font-semibold text-slate-700 flex items-center gap-1.5">
-                        <ClipboardList size={15} /> Recorded for tomorrow's comparison
+                        <ClipboardList size={15} /> Saved for{' '}
+                        {deliveryDate ? deliveryDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'the delivery day'}
                     </span>
-                    <span className="text-slate-500 text-xs">
-                        The requirement and this recommendation are saved against{' '}
-                        {deliveryDate ? deliveryDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'the delivery day'}.
-                        When that day's indent and purchase files are uploaded, the Variance screen shows
-                        whether your order or this one would have met the requirement more closely.
-                        Nothing to fill in.
+                    <span
+                        className="text-slate-400 text-xs cursor-help border-b border-dotted border-slate-300"
+                        title="The requirement and this recommendation are recorded against that delivery day. Once its indent and purchase files are uploaded, the Variance screen compares them. Nothing to fill in."
+                    >
+                        compared automatically once the files arrive
                     </span>
                     {recordError && (
                         <span className="text-amber-700 font-medium text-xs">

@@ -29,6 +29,8 @@ export const atLeast = (role: UserRole | undefined | null, minimum: UserRole): b
 export const can = {
   /** See the dashboard and the numbers on it. */
   view: (r: UserRole | undefined | null) => atLeast(r, 'viewer'),
+  /** Open the history of past runs. Working material, not a published view. */
+  viewHistory: (r: UserRole | undefined | null) => atLeast(r, 'auditor'),
   /** Run a calculation and save it to history. */
   calculate: (r: UserRole | undefined | null) => atLeast(r, 'auditor'),
   /** Upload or replace the source data files. */
