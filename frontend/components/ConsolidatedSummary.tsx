@@ -529,13 +529,21 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
 
             const arrivedQty = aggRow ? aggRow.arrivedQty : 0;
 
+            // A day with no row in the saved matrix has no arrival breakdown at
+            // all — the indent for it had not been placed when the calculation
+            // ran. Four zeros claim the opposite: that the order exists and
+            // nothing is expected against it. Mark it unknown instead, and the
+            // table prints a dash.
             const distribution = aggRow ? {
                 d1: aggRow.d1, d2: aggRow.d2, d3: aggRow.d3, d4: aggRow.d4
             } : {
-                d1: { qty: 0, type: 'Actual' }, d2: { qty: 0, type: 'Actual' }, d3: { qty: 0, type: 'Actual' }, d4: { qty: 0, type: 'Actual' }
+                d1: { qty: null, type: 'Unknown' }, d2: { qty: null, type: 'Unknown' },
+                d3: { qty: null, type: 'Unknown' }, d4: { qty: null, type: 'Unknown' },
             };
+            const knownFromRun = Boolean(aggRow);
 
             unifiedLifecycleData.push({
+                knownFromRun,
                 indentDate: loopDate, issueDate, status, indentQty, arrivedQty, distribution
             });
         }
@@ -1080,10 +1088,14 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                                     }
 
                                     // Helper for cell coloring
-                                    const getCellClass = (cell: { qty: number, type: 'Actual' | 'Forecast' }) => {
+                                    const getCellClass = (cell: { qty: number | null; type: string }) => {
+                                        if (cell.qty === null || cell.type === 'Unknown') return "text-slate-300 font-mono";
                                         if (cell.type === 'Forecast') return "text-orange-600 bg-orange-50 font-medium font-mono";
                                         return "text-blue-600 font-medium font-mono";
                                     };
+                                    // A dash where the saved run has no breakdown for this day.
+                                    const dCell = (cell: { qty: number | null; type: string }) =>
+                                        cell.qty === null ? '-' : Math.round(cell.qty).toLocaleString();
 
                                     const arrivedClass = isRecommendation ? "text-slate-400 italic font-mono" : "text-blue-700 font-bold font-mono";
 
@@ -1103,10 +1115,10 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                                                 {isRecommendation ? 'Pending' : (row.arrivedQty > 0 ? Math.round(row.arrivedQty).toLocaleString() : '-')}
                                             </td>
                                             {/* Breakdown Columns */}
-                                            <td className={`px-2 py-1 text-center ${getCellClass(row.distribution.d1)}`}>{Math.round(row.distribution.d1.qty).toLocaleString()}</td>
-                                            <td className={`px-2 py-1 text-center ${getCellClass(row.distribution.d2)}`}>{Math.round(row.distribution.d2.qty).toLocaleString()}</td>
-                                            <td className={`px-2 py-1 text-center ${getCellClass(row.distribution.d3)}`}>{Math.round(row.distribution.d3.qty).toLocaleString()}</td>
-                                            <td className={`px-2 py-1 text-center ${getCellClass(row.distribution.d4)}`}>{Math.round(row.distribution.d4.qty).toLocaleString()}</td>
+                                            <td className={`px-2 py-1 text-center ${getCellClass(row.distribution.d1)}`}>{dCell(row.distribution.d1)}</td>
+                                            <td className={`px-2 py-1 text-center ${getCellClass(row.distribution.d2)}`}>{dCell(row.distribution.d2)}</td>
+                                            <td className={`px-2 py-1 text-center ${getCellClass(row.distribution.d3)}`}>{dCell(row.distribution.d3)}</td>
+                                            <td className={`px-2 py-1 text-center ${getCellClass(row.distribution.d4)}`}>{dCell(row.distribution.d4)}</td>
                                         </tr>
                                     );
                                 })}
