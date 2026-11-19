@@ -918,6 +918,39 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                 );
             })()}
 
+            {/* Everything below is read out of a SAVED run. If the source files
+                were replaced after that run was made, the arrivals it recorded are
+                whatever the old file happened to contain — and a day the old file
+                barely covered shows as a confident zero rather than as "not known
+                yet". That is indistinguishable from a real zero on screen, so the
+                only honest thing is to say the run is behind the data. */}
+            {(() => {
+                const runAt = latestCalculation.timestamp;
+                const uploads = [indentData, purchaseData, bondingData]
+                    .map(f => (f?.lastUpdated ? new Date(f.lastUpdated).getTime() : NaN))
+                    .filter(t => Number.isFinite(t) && t > 0);
+                if (!uploads.length || !Number.isFinite(runAt) || runAt <= 0) return null;
+                const newest = Math.max(...uploads);
+                // A minute of slack: the upload and the run that follows it are
+                // seconds apart and must not trip this.
+                if (newest <= runAt + 60_000) return null;
+                const when = (t: number) => {
+                    const d = new Date(t);
+                    return `${formatDateGB(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                };
+                return (
+                    <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-sm">
+                        <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+                        <span>
+                            <strong>The data files are newer than this calculation.</strong>{' '}
+                            The files were updated on {when(newest)}, but these figures come from a
+                            run made on {when(runAt)}. Cane recorded since then is not counted below,
+                            so arrivals will read low. Run the calculation again to refresh it.
+                        </span>
+                    </div>
+                );
+            })()}
+
             {/* 1. Season Status Header (Context Aware) */}
             <div className={`text-white p-4 rounded-xl shadow-lg border ${selectedScope === 'all' ? 'bg-[#001f4c] border-[#003580]' : 'bg-[#003580] border-[#001f4c]'}`}>
                 <div className="flex flex-col md:flex-row justify-between items-center gap-6">
