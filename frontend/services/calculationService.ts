@@ -399,6 +399,13 @@ const calculateOpenIndentMatrix = (
         headers.push(new Date(d));
     }
 
+    // How far the uploaded purchase data actually reaches. Everything after it
+    // is unknown, whether or not the calendar has passed it.
+    const lastPurchaseDate = purchases.reduce(
+        (max, p) => (p.purchaseDate > max ? p.purchaseDate : max),
+        addDays(currentDate, -deliveryLagDays - 1)
+    );
+
     const t_plus_3 = addDays(currentDate, deliveryLagDays);
     const recommendedIndentsMap = new Map(recommendedIndents.map(i => [i.centreId, i.indentToRaise]));
     
@@ -451,7 +458,13 @@ const calculateOpenIndentMatrix = (
             }
 
             const entries: OpenIndentMatrixEntry[] = headers.map(header => {
-                const isPast = header.getTime() < currentDate.getTime();
+                // "Actual" means the purchase data actually COVERS that day, not
+                // merely that the day is in the past. The uploaded file usually
+                // lags the run date by a day or two, and treating those days as
+                // past made the app report an actual of zero for them — cane
+                // that had in fact arrived, simply not exported yet. A day the
+                // data does not reach is still a forecast.
+                const isPast = header.getTime() <= lastPurchaseDate.getTime();
                 
                 let quantity = 0;
                 let dWeight: number | undefined;
