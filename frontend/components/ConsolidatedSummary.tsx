@@ -365,9 +365,32 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
         };
 
         // --- 3. Performance Table Data (Last 5 Days) - Scoped ---
+        // This table compares the app's indent with the plant team's indent for
+        // the same delivery day. Both exist as soon as the order is placed, so
+        // there is no reason to stop at yesterday: the indent file already holds
+        // the plant team's orders up to three days ahead (placed on the 22nd
+        // for delivery on the 25th). Anchor on the last delivery day the file
+        // reaches, never past the day the current run itself is for.
+        let lastIndentDay: Date | null = null;
+        for (const row of indentData.data) {
+            const d = parseDate(getValue(row, ['Indent Date']));
+            if (d && (!lastIndentDay || d > lastIndentDay)) lastIndentDay = d;
+        }
+        const runDeliveryDay = addDays(currentDate, deliveryLagDays);
+        const performanceAnchor = lastIndentDay
+            ? (lastIndentDay > runDeliveryDay ? runDeliveryDay : lastIndentDay)
+            : addDays(currentDate, -1);
+        // Cane received up to a day is only known while the purchase file
+        // reaches that day.
+        let lastPurchaseDay: Date | null = null;
+        for (const row of purchaseData.data) {
+            const d = parseDate(getValue(row, ['Purchase Date']));
+            if (d && (!lastPurchaseDay || d > lastPurchaseDay)) lastPurchaseDay = d;
+        }
+
         const performanceTableData = [];
-        for (let i = 1; i <= 5; i++) {
-            const date = addDays(currentDate, -i);
+        for (let i = 0; i < 5; i++) {
+            const date = addDays(performanceAnchor, -i);
             
             // A run made on day X recommends for delivery on X + the lag, so the
             // run that predicted THIS row is the one made `lag` days earlier.
@@ -434,7 +457,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                 predicted: historyRun ? predictedIndent : null,
                 actual: actualIndent,
                 variance,
-                cumulativeRate: dailyCumulRate
+                cumulativeRate: lastPurchaseDay && date <= lastPurchaseDay ? dailyCumulRate : null
             });
         }
 
@@ -1112,7 +1135,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                                                 : (row.variance > 0 ? '+' : '') + (row.variance * 100).toFixed(1) + '%'}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono text-slate-600">
-                                            {row.cumulativeRate > 0
+                                            {row.cumulativeRate !== null && row.cumulativeRate > 0
                                                 ? Math.round(row.cumulativeRate).toLocaleString()
                                                 : <span className="text-slate-300" title="No purchases recorded between the season start and this day.">-</span>}
                                         </td>
