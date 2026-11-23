@@ -368,12 +368,30 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
     // because the purchase file stopped at the 16th.
     //
     // The cut-off is derived from the data rather than from today's date,
-    // because the files usually lag: the newest delivery day that has any
-    // arrivals at all marks how far the purchase data reaches.
-    const settledCutoff = `
-      (SELECT DATE_SUB(MAX(l2.delivery_date), INTERVAL 3 DAY)
-         FROM indent_ledger l2
-        WHERE l2.org_id = ? AND l2.actual_arrival > 0)`;
+    // because the files usually lag. It is the last PURCHASE date in the
+    // uploaded purchase file, minus three days.
+    //
+    // It used to be "the newest delivery day with any arrivals, minus three",
+    // but cane sometimes arrives a day early against the next day's order. On
+    // 23 November 426 qtl had already landed against the 23rd's orders while
+    // the purchase file stopped at the 22nd, so that rule called the 20th
+    // settled when its fourth day of cane had not been recorded yet, and
+    // scored it against partial arrivals.
+    const [[cut]]: any = await pool.query(
+      `SELECT DATE_FORMAT(DATE_SUB(COALESCE(
+                (SELECT MAX(STR_TO_DATE(TRIM(jt.pd), '%d/%m/%Y'))
+                   FROM org_data_files f,
+                        JSON_TABLE(CAST(f.data_json AS JSON), '$[*]'
+                          COLUMNS (pd VARCHAR(32) PATH '$."Purchase Date"')) jt
+                  WHERE f.org_id = ? AND f.data_type = 'PURCHASE'),
+                (SELECT MAX(l2.delivery_date) FROM indent_ledger l2
+                  WHERE l2.org_id = ? AND l2.actual_arrival > 0)
+              ), INTERVAL 3 DAY), '%Y-%m-%d') AS cutoff`,
+      [user.orgId, user.orgId]
+    );
+    // No purchase data and no arrivals at all: nothing is settled.
+    const cutoffDate: string = cut?.cutoff ?? '1900-01-01';
+    const settledCutoff = '?';
 
     const scope = `
       FROM indent_ledger
@@ -398,7 +416,7 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
     // ── Day totals: the unit the verdict rests on ──
     const [byDayRaw]: any = await pool.query(
       `SELECT delivery_date, ${sums} ${scope} GROUP BY delivery_date ORDER BY delivery_date DESC`,
-      [user.orgId, from, to, user.orgId]
+      [user.orgId, from, to, cutoffDate]
     );
 
     const n = (v: any): number => (v === null || v === undefined ? 0 : Number(v));
@@ -461,7 +479,7 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
       `SELECT centre_id, centre_name, is_gate, ${sums} ${scope}
         GROUP BY centre_id, centre_name, is_gate
         ORDER BY SUM(requirement) DESC`,
-      [user.orgId, from, to, user.orgId]
+      [user.orgId, from, to, cutoffDate]
     );
 
     const byCentre = byCentreRaw.map((c: any) => {
@@ -494,7 +512,7 @@ router.get('/scorecard', requireAuth, async (req: AuthRequest, res) => {
                                   THEN delivery_date END)          AS days_still_arriving
          FROM indent_ledger
         WHERE org_id = ? AND delivery_date BETWEEN ? AND ?`,
-      [user.orgId, user.orgId, from, to]
+      [cutoffDate, user.orgId, from, to]
     );
 
     res.json({ ok: true, overall: totals, byDay, byCentre, coverage: coverage[0] });

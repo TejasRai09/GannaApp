@@ -281,6 +281,23 @@ export const syncOutcomes = async (
   const indentByDate = byDate(indentRows, ['Indent Date']);
   const arrivalByDate = byDate(purchaseRows, ['Indent Date']);
 
+  // How far the purchase file reaches. Cane for an order lands over four days
+  // (D1 to D4), so once the file covers the delivery day plus three, every
+  // arrival that is ever going to be recorded for it is in. From then on a
+  // centre that ordered and has no purchase rows received NOTHING, and that is
+  // an outcome, not a gap. Sending null for it made the scorecard drop the
+  // centre entirely: RATANGANJ III ordered 324 qtl for 20 November and got
+  // nothing, and the scorecard's "you ordered" came out 324 short of the
+  // indent file.
+  let lastPurchaseIso = '';
+  for (const r of purchaseRows) {
+    const raw = pick(r, ['Purchase Date']);
+    const d = raw ? parseLooseDate(raw) : null;
+    if (!d) continue;
+    const iso = toIsoDate(d);
+    if (iso > lastPurchaseIso) lastPurchaseIso = iso;
+  }
+
   let days = 0, rowsWritten = 0;
   for (const d of dates) {
     const key = toIsoDate(d);
@@ -288,11 +305,14 @@ export const syncOutcomes = async (
     const arr = arrivalByDate.get(key);
     if (!ind && !arr) continue;
 
+    const settled = lastPurchaseIso !== ''
+      && toIsoDate(new Date(d.getTime() + 3 * 86400000)) <= lastPurchaseIso;
     const centres = new Set<string>([...(ind?.keys() ?? []), ...(arr?.keys() ?? [])]);
     const rows = Array.from(centres).map((centreId) => ({
       centreId,
       actualIndent: ind?.get(centreId) ?? null,
-      actualArrival: arr?.get(centreId) ?? null,
+      actualArrival: arr?.get(centreId)
+        ?? (settled && (ind?.get(centreId) ?? 0) > 0 ? 0 : null),
     }));
     if (rows.length === 0) continue;
 
