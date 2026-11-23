@@ -150,6 +150,38 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = (props) => {
 
     const stepProps: any = { ...props, handleNext, handlePrev, isReadOnly };
 
+    // A viewer only ever arrives here from "View Report". Give them the results
+    // and nothing that uploads, calculates, simulates or changes settings.
+    if (isReadOnly) {
+        return (
+            <>
+                <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
+                    <Header
+                        pageTitle="Calculation Results"
+                        onNavigate={props.onNavigate}
+                        onLogout={props.onLogout}
+                        showLogic
+                        onOpenLogic={() => props.setIsLogicModalOpen(true)}
+                    />
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full flex-grow">
+                        <div className="bg-white p-8 rounded-xl shadow-md min-h-[400px]">
+                            <Step4Results
+                                {...stepProps}
+                                isReadOnly
+                                onStartNew={() => props.onNavigate('history')}
+                                bondingData={null}
+                                indentData={null}
+                                purchaseData={null}
+                                onSaveSimulation={() => undefined}
+                            />
+                        </div>
+                    </main>
+                </div>
+                <LogicExplanationModal isOpen={props.isLogicModalOpen} onClose={() => props.setIsLogicModalOpen(false)} />
+            </>
+        );
+    }
+
     const steps = [
         { id: 1, name: 'Manage Data' },
         { id: 2, name: 'Set Parameters' },

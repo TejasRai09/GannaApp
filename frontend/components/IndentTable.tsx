@@ -3,6 +3,7 @@ import type { CalculationResults } from '../types';
 import { ClipboardList, Download, Sparkles } from 'lucide-react';
 import { exportToCsv } from '../services/exportService';
 import { useAuth } from '../context/AuthContext';
+import { can } from '../services/permissions';
 import { addDays } from '../services/dateUtils';
 import { savePredictions } from '../services/feedbackService';
 
@@ -27,7 +28,7 @@ const STATUS_BADGE: Record<string, { dot: string; label: string }> = {
 
 export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationName, currentDate }) => {
     const { tableData, overallBandLo, overallBandMid, overallBandHigh } = results;
-    const { token } = useAuth();
+    const { token, currentUser } = useAuth();
 
     const totalIndentToRaise = tableData.reduce((sum, row) => sum + row.indentToRaise, 0);
     const totalExcelIndent   = tableData.reduce((sum, row) => sum + row.dWeightIndent, 0);
@@ -39,7 +40,7 @@ export const IndentTable: React.FC<IndentTableProps> = ({ results, calculationNa
     // and what actually arrived both come from the next day's uploaded files,
     // which is what makes the comparison free.
     const deliveryDate = currentDate ? addDays(currentDate, 3) : null;
-    const recordingOn  = Boolean(token && deliveryDate);
+    const recordingOn  = Boolean(token && deliveryDate && can.calculate(currentUser?.role));
     const [recordError, setRecordError] = useState<string | null>(null);
     // Guards against re-saving on every re-render of the same run.
     const savedForDate = useRef<string | null>(null);

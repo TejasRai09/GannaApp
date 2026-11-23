@@ -74,9 +74,11 @@ interface Step4ResultsProps {
     indentData: any[] | null;
     purchaseData: any[] | null;
     onSaveSimulation: (name: string, inputs: Partial<CalculationInputs>) => void;
+    /** Viewer: show the results, no simulation and no new calculation. */
+    isReadOnly?: boolean;
 }
 
-export const Step4Results: React.FC<Step4ResultsProps> = ({ activeCalculation, onStartNew, setIsLogicModalOpen, currentDate, bondingData, indentData, purchaseData, onSaveSimulation }) => {
+export const Step4Results: React.FC<Step4ResultsProps> = ({ activeCalculation, onStartNew, setIsLogicModalOpen, currentDate, bondingData, indentData, purchaseData, onSaveSimulation, isReadOnly = false }) => {
     const [activeTab, setActiveTab] = useState<ActiveTab>('summary');
     const [isSimulationModalOpen, setIsSimulationModalOpen] = useState(false);
 
@@ -92,12 +94,14 @@ export const Step4Results: React.FC<Step4ResultsProps> = ({ activeCalculation, o
         return (
             <div className="text-center py-12">
                 <h2 className="text-xl font-bold text-slate-800">No Calculation Results to Display</h2>
-                <p className="text-slate-500 mt-2">Please complete the previous steps or select a historical report to view.</p>
+                <p className="text-slate-500 mt-2">
+                    {isReadOnly ? 'Open a report from the history to view it.' : 'Please complete the previous steps or select a historical report to view.'}
+                </p>
                 <button
                     onClick={onStartNew}
                     className="mt-6 px-6 py-3 text-base font-bold text-white bg-[#003580] rounded-lg shadow-md hover:bg-[#002a66] transition-colors"
                 >
-                   Start New Calculation
+                   {isReadOnly ? 'Back to History' : 'Start New Calculation'}
                 </button>
             </div>
         );
@@ -133,6 +137,14 @@ export const Step4Results: React.FC<Step4ResultsProps> = ({ activeCalculation, o
                     <p className="text-xs text-slate-500">Calculated on {new Date(activeCalculation.timestamp).toLocaleString()}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
+                    {isReadOnly ? (
+                    <button
+                        onClick={onStartNew}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-white text-slate-700 font-semibold text-sm rounded-lg border border-slate-300 hover:bg-slate-50 transition-colors"
+                    >
+                       Back to History
+                    </button>
+                    ) : (<>
                     <button
                         onClick={() => setIsSimulationModalOpen(true)}
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 font-semibold text-sm rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-colors"
@@ -145,6 +157,7 @@ export const Step4Results: React.FC<Step4ResultsProps> = ({ activeCalculation, o
                     >
                        <RefreshCcw size={16}/> Start New Calculation
                     </button>
+                    </>)}
                 </div>
             </div>
 
@@ -162,7 +175,7 @@ export const Step4Results: React.FC<Step4ResultsProps> = ({ activeCalculation, o
                 <div className="p-6 bg-white rounded-b-lg">
                     <RiskAlertBanner 
                         risks={calculationResults.riskAnalysis || []} 
-                        onOpenSimulation={() => setIsSimulationModalOpen(true)}
+                        onOpenSimulation={isReadOnly ? undefined : () => setIsSimulationModalOpen(true)}
                     />
 
                     <TabHeader 
@@ -189,7 +202,7 @@ export const Step4Results: React.FC<Step4ResultsProps> = ({ activeCalculation, o
                 </div>
             </div>
 
-            {bondingData && indentData && purchaseData && (
+            {!isReadOnly && bondingData && indentData && purchaseData && (
                 <SimulationModal 
                     isOpen={isSimulationModalOpen}
                     onClose={() => setIsSimulationModalOpen(false)}

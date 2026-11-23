@@ -946,7 +946,10 @@ const AppContent: React.FC = () => {
         if (!can.editBranding(role)) return denied('branding');
         return <BrandingPage onNavigate={navigate} onLogout={handleLogout} onUpdateBranding={handleUpdateBranding} />;
     }
-    if (page === 'calculator' && !can.calculate(role)) return denied('the calculator');
+    // Viewers reach this page only to read a saved run ("View Report" from
+    // history). Running a calculation stays auditor-only; CalculatorPage shows
+    // them the results and nothing else.
+    if (page === 'calculator' && !can.calculate(role) && !activeCalculationId) return denied('the calculator');
     
     if (page === 'dashboard') {
         return <DashboardPage

@@ -5,7 +5,7 @@ import type { RiskAnalysisItem } from '../types';
 
 interface RiskAlertBannerProps {
     risks: RiskAnalysisItem[];
-    onOpenSimulation: () => void;
+    onOpenSimulation?: () => void;
 }
 
 export const RiskAlertBanner: React.FC<RiskAlertBannerProps> = ({ risks, onOpenSimulation }) => {
@@ -29,7 +29,7 @@ export const RiskAlertBanner: React.FC<RiskAlertBannerProps> = ({ risks, onOpenS
                             <h4 className={`font-bold text-lg ${risk.type === 'field' ? 'text-amber-900' : 'text-blue-900'}`}>
                                 {risk.type === 'field' ? 'Supply Risk Detected' : 'Operational Adjustment Applied'}
                             </h4>
-                            {risk.type === 'field' && (
+                            {risk.type === 'field' && onOpenSimulation && (
                                 <button 
                                     onClick={onOpenSimulation}
                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded hover:bg-amber-700 transition-colors shadow-sm"
