@@ -77,6 +77,9 @@ export const auditFromReq = (
     action,
     orgId: req.user?.orgId ?? null,
     userId: req.user?.id ?? null,
+    // Without this every upload, clear and settings change was logged with a
+    // blank email, and the activity page showed the person as "unknown".
+    userEmail: req.user?.email ?? null,
     userRole: req.user?.role ?? null,
     ip: clientIp(req),
     ...rest,
