@@ -76,7 +76,9 @@ const Direction: React.FC<{ pct: number | null }> = ({ pct }) => {
 export const VariancePage: React.FC<Props> = ({ onNavigate, onLogout }) => {
     const { token } = useAuth();
 
-    const [days, setDays] = useState(30);
+    // Opens on the recent week, the window the plant team and management
+    // review; the longer views are one click away in the selector.
+    const [days, setDays] = useState(7);
     const [score, setScore] = useState<Scorecard | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
