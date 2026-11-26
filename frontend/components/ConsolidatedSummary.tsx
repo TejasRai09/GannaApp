@@ -1109,7 +1109,7 @@ export const ConsolidatedSummary: React.FC<ConsolidatedSummaryProps> = (props) =
                                     <th className="px-3 py-2 rounded-l-md" title="The day the cane was wanted. The indent for it was placed three days earlier.">Delivery Date</th>
                                     <th className="px-3 py-2 text-right">Target</th>
                                     <th className="px-3 py-2 text-right" title="What the app recommended ordering for this delivery day, from the calculation run three days before it.">Predicted Indent</th>
-                                    <th className="px-3 py-2 text-right">Actual Indent</th>
+                                    <th className="px-3 py-2 text-right" title="Slips issued for this delivery day, from the uploaded indent file. The decided indent in the crushing report is usually lower.">Indent Issued (Slips)</th>
                                     <th className="px-3 py-2 text-right">Var %</th>
                                     <th className="px-3 py-2 text-right rounded-r-md">Cumul. Rate</th>
                                 </tr>

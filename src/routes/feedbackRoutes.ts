@@ -258,11 +258,18 @@ router.post('/outcomes', requireAuth, requireRole('auditor'), async (req: AuthRe
 
       const [result]: any = await pool.query(
         `UPDATE indent_ledger
-            SET actual_indent  = COALESCE(?, actual_indent),
+            SET actual_indent  = CASE WHEN ? IS NULL THEN actual_indent
+                                     ELSE GREATEST(COALESCE(actual_indent, 0), ?) END,
                 actual_arrival = COALESCE(?, actual_arrival),
                 outcome_source = ?
           WHERE org_id = ? AND delivery_date = ? AND centre_id = ?`,
-        [actualIndent, actualArrival, src, user.orgId, deliveryDate, centreId]
+        // The plant team's order is kept at the highest figure ever seen for
+        // that centre and day. The indent export lists slips that are still
+        // valid, so once a day has passed its total falls as unused slips are
+        // cancelled: 16 November read 135,126 on the 19th and 102,780 on the
+        // 26th. Taking each new file's figure scored the plant team against
+        // an order that had shrunk to roughly what arrived.
+        [actualIndent, actualIndent, actualArrival, src, user.orgId, deliveryDate, centreId]
       );
       updated += result.affectedRows;
     }
